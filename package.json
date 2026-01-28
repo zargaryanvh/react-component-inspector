@@ -1,0 +1,38 @@
+{
+  "name": "react-component-inspector",
+  "version": "1.0.0",
+  "description": "A development tool for inspecting React components with AI-friendly metadata extraction",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "react",
+    "component",
+    "inspection",
+    "development",
+    "debugging",
+    "ai",
+    "metadata",
+    "tool"
+  ],
+  "author": "",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=16.8.0",
+    "react-dom": ">=16.8.0",
+    "@mui/material": ">=5.0.0",
+    "@mui/icons-material": ">=5.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "typescript": "^5.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/react-component-inspector.git"
+  }
+}
