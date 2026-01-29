@@ -361,7 +361,7 @@ export const InspectionTooltip: React.FC = () => {
           </Typography>
           {isLocked && (
             <Typography variant="caption" sx={{ color: "#4caf50", fontSize: "0.7rem", fontStyle: "italic" }}>
-              (Locked - Release CTRL to unlock)
+              (Locked - Release H to unlock)
             </Typography>
           )}
         </Box>

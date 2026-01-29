@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from "react";
+import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect, useRef } from "react";
 import { setInspectionActive } from "./inspectionInterceptors";
 import { setupAutoInspection } from "./autoInspection";
 
@@ -38,6 +38,25 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
   const [hoveredComponent, setHoveredComponentState] = useState<ComponentMetadata | null>(null);
   const [hoveredElement, setHoveredElement] = useState<HTMLElement | null>(null);
 
+  // Use refs to always access latest state values in event handlers
+  const isInspectionActiveRef = useRef(isInspectionActive);
+  const isLockedRef = useRef(isLocked);
+  const hoveredComponentRef = useRef(hoveredComponent);
+  const hKeyPressedRef = useRef(false); // Track if H key is currently being held
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    isInspectionActiveRef.current = isInspectionActive;
+  }, [isInspectionActive]);
+
+  useEffect(() => {
+    isLockedRef.current = isLocked;
+  }, [isLocked]);
+
+  useEffect(() => {
+    hoveredComponentRef.current = hoveredComponent;
+  }, [hoveredComponent]);
+
   // Track CTRL key state and CTRL+H for locking
   React.useEffect(() => {
     if (process.env.NODE_ENV !== "development") {
@@ -45,29 +64,29 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // H key pressed (with or without CTRL) to lock tooltip position while hovering
-      if (e.key.toLowerCase() === "h") {
-        // Only lock if inspection is active, we have a hovered component, and it's not already locked
-        if (isInspectionActive && hoveredComponent && !isLocked) {
-          e.preventDefault();
+      // H key pressed while CTRL is held - lock tooltip position
+      if (e.key.toLowerCase() === "h" && e.ctrlKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Ignore repeated keydown events (when key is held down)
+        if (e.repeat) {
+          return;
+        }
+        
+        // Only lock if inspection is active, we have a hovered component, and H is not already being held
+        if (isInspectionActiveRef.current && hoveredComponentRef.current && !hKeyPressedRef.current) {
+          hKeyPressedRef.current = true;
           setIsLocked(true);
           if (process.env.NODE_ENV === "development") {
-            console.log("[Inspection] Tooltip locked - position fixed. Press H again or release CTRL to unlock.");
-          }
-        }
-        // If already locked and H is pressed again, unlock (toggle behavior)
-        else if (isLocked && isInspectionActive) {
-          e.preventDefault();
-          setIsLocked(false);
-          if (process.env.NODE_ENV === "development") {
-            console.log("[Inspection] Tooltip unlocked - inspection continues while CTRL is held.");
+            console.log("[Inspection] Tooltip LOCKED - Hold H to keep locked. Release H to unlock.");
           }
         }
         return;
       }
 
       // CTRL key pressed
-      if (e.key === "Control" || e.ctrlKey) {
+      if (e.key === "Control" && !e.repeat) {
         setIsInspectionActive(true);
         setInspectionActive(true);
         if (process.env.NODE_ENV === "development") {
@@ -77,10 +96,32 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      // H key released - unlock tooltip but keep inspection active if CTRL is still held
+      if (e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Only process if H was actually being held
+        if (hKeyPressedRef.current) {
+          const wasLocked = isLockedRef.current;
+          hKeyPressedRef.current = false;
+          
+          // Only unlock if we were locked and CTRL is still held
+          if (wasLocked && e.ctrlKey && isInspectionActiveRef.current) {
+            setIsLocked(false);
+            if (process.env.NODE_ENV === "development") {
+              console.log("[Inspection] Tooltip UNLOCKED - inspection continues while CTRL is held.");
+            }
+          }
+        }
+        return;
+      }
+
       // CTRL key released - unlock and clear
-      if (e.key === "Control" || (!e.ctrlKey && e.key !== "h")) {
+      if (e.key === "Control") {
         setIsInspectionActive(false);
         setIsLocked(false);
+        hKeyPressedRef.current = false;
         setInspectionActive(false);
         setHoveredComponentState(null);
         setHoveredElement(null);
@@ -88,7 +129,6 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
           console.log("[Inspection] Deactivated");
         }
       }
-      // Note: H key release doesn't unlock anymore - use H key press to toggle lock state
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -98,7 +138,7 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [isInspectionActive, hoveredComponent, isLocked]);
+  }, []); // Empty deps - refs handle state access
 
   const setHoveredComponent = useCallback((component: ComponentMetadata | null, element: HTMLElement | null) => {
     if (process.env.NODE_ENV !== "development") {
