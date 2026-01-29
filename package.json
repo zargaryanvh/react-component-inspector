@@ -1,5 +1,5 @@
 {
-  "name": "react-component-inspector",
+  "name": "@zargaryanvh/react-component-inspector",
   "version": "1.0.0",
   "description": "A development tool for inspecting React components with AI-friendly metadata extraction",
   "main": "dist/index.js",
@@ -49,6 +49,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/zargaryanvh/react-component-inspector.git"
+    "url": "git+https://github.com/zargaryanvh/react-component-inspector.git"
   }
 }
