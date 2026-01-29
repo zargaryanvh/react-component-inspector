@@ -1,0 +1,32 @@
+# Development files
+.git/
+node_modules/
+build/
+*.log
+.DS_Store
+.env
+.env.local
+*.tsbuildinfo
+
+# Source files (only dist should be published)
+src/
+tsconfig.json
+
+# Documentation (keep README and LICENSE)
+docs/
+CONTRIBUTING.md
+CURSOR_AI_DESIGN.md
+GITHUB_SETUP.md
+
+# Test files
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
