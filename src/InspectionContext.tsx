@@ -43,6 +43,23 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
   const isLockedRef = useRef(isLocked);
   const hoveredComponentRef = useRef(hoveredComponent);
   const hKeyPressedRef = useRef(false); // Track if H key is currently being held
+  
+  // Mobile touch support
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const touchStartTimeRef = useRef<number>(0);
+  const lastTapRef = useRef<number>(0);
+  const isMobileRef = useRef(false);
+
+  // Detect mobile device
+  useEffect(() => {
+    const checkMobile = () => {
+      if (typeof window === 'undefined') return false;
+      return 'ontouchstart' in window || 
+             navigator.maxTouchPoints > 0 || 
+             /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    };
+    isMobileRef.current = checkMobile();
+  }, []);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -57,11 +74,89 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
     hoveredComponentRef.current = hoveredComponent;
   }, [hoveredComponent]);
 
-  // Track CTRL key state and CTRL+H for locking
+  // Mobile touch handlers for activation and locking
   React.useEffect(() => {
     if (process.env.NODE_ENV !== "development") {
       return; // Only in development
     }
+
+    // Long-press to activate inspection mode (mobile)
+    const handleTouchStart = (e: TouchEvent) => {
+      if (!isMobileRef.current) return;
+      
+      // Only activate if touching with 3 fingers (to avoid accidental activation)
+      if (e.touches.length === 3) {
+        touchStartTimeRef.current = Date.now();
+        
+        longPressTimerRef.current = setTimeout(() => {
+          setIsInspectionActive(true);
+          setInspectionActive(true);
+          if (process.env.NODE_ENV === "development") {
+            console.log("[Inspection] Activated (mobile) - Long-press with 3 fingers. Double-tap tooltip to lock.");
+          }
+        }, 800); // 800ms long-press
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (!isMobileRef.current) return;
+      
+      // Clear long-press timer
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+
+      // Double-tap detection for locking (on tooltip or component)
+      const now = Date.now();
+      const timeSinceLastTap = now - lastTapRef.current;
+      
+      if (timeSinceLastTap < 300 && timeSinceLastTap > 0) {
+        // Double-tap detected
+        if (isInspectionActiveRef.current && hoveredComponentRef.current && !isLockedRef.current) {
+          setIsLocked(true);
+          if (process.env.NODE_ENV === "development") {
+            console.log("[Inspection] Tooltip LOCKED (mobile) - Double-tap again to unlock.");
+          }
+        } else if (isLockedRef.current) {
+          // Unlock on double-tap when locked
+          setIsLocked(false);
+          if (process.env.NODE_ENV === "development") {
+            console.log("[Inspection] Tooltip UNLOCKED (mobile) - inspection continues.");
+          }
+        }
+        lastTapRef.current = 0; // Reset
+      } else {
+        lastTapRef.current = now;
+      }
+
+      // Deactivate if 3-finger touch ends and inspection was active
+      if (e.touches.length === 0 && isInspectionActiveRef.current) {
+        const touchDuration = Date.now() - touchStartTimeRef.current;
+        // Only deactivate if it was a quick tap (not a long-press that activated)
+        if (touchDuration < 800) {
+          setIsInspectionActive(false);
+          setIsLocked(false);
+          hKeyPressedRef.current = false;
+          setInspectionActive(false);
+          setHoveredComponentState(null);
+          setHoveredElement(null);
+          if (process.env.NODE_ENV === "development") {
+            console.log("[Inspection] Deactivated (mobile)");
+          }
+        }
+      }
+    };
+
+    const handleTouchCancel = () => {
+      if (!isMobileRef.current) return;
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+    };
+
+    // Track CTRL key state and CTRL+H for locking (desktop)
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // H key pressed while CTRL is held - lock tooltip position
@@ -133,10 +228,23 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
 
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
+    
+    // Mobile touch events
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    window.addEventListener("touchcancel", handleTouchCancel, { passive: true });
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchend", handleTouchEnd);
+      window.removeEventListener("touchcancel", handleTouchCancel);
+      
+      // Cleanup timers
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+      }
     };
   }, []); // Empty deps - refs handle state access
 

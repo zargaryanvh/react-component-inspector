@@ -59,6 +59,30 @@ export const InspectionWrapper: React.FC<InspectionWrapperProps> = ({
     setHoveredComponent(null, null);
   };
 
+  // Touch handlers for mobile
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (!isInspectionActive) return;
+
+    const target = e.currentTarget as HTMLElement;
+
+    const metadata: ComponentMetadata = {
+      componentName,
+      componentId: generateComponentId(componentName, instanceIndex),
+      variant,
+      role,
+      usagePath,
+      instanceIndex,
+      propsSignature: formatPropsSignature(props),
+      sourceFile,
+    };
+
+    setHoveredComponent(metadata, target);
+  };
+
+  const handleTouchEnd = () => {
+    // Don't clear on touch end - let autoInspection handle it
+  };
+
   // Clone the child element and add inspection handlers
   if (!React.isValidElement(children)) {
     return <>{children}</>;
@@ -67,6 +91,8 @@ export const InspectionWrapper: React.FC<InspectionWrapperProps> = ({
   const existingProps = (children.props || {}) as any;
   const existingOnMouseEnter = existingProps.onMouseEnter;
   const existingOnMouseLeave = existingProps.onMouseLeave;
+  const existingOnTouchStart = existingProps.onTouchStart;
+  const existingOnTouchEnd = existingProps.onTouchEnd;
 
   const childWithProps = React.cloneElement(children, {
     onMouseEnter: (e: React.MouseEvent) => {
@@ -79,6 +105,18 @@ export const InspectionWrapper: React.FC<InspectionWrapperProps> = ({
       handleMouseLeave();
       if (existingOnMouseLeave) {
         existingOnMouseLeave(e);
+      }
+    },
+    onTouchStart: (e: React.TouchEvent) => {
+      handleTouchStart(e);
+      if (existingOnTouchStart) {
+        existingOnTouchStart(e);
+      }
+    },
+    onTouchEnd: (e: React.TouchEvent) => {
+      handleTouchEnd();
+      if (existingOnTouchEnd) {
+        existingOnTouchEnd(e);
       }
     },
     "data-inspection-id": generateComponentId(componentName, instanceIndex),

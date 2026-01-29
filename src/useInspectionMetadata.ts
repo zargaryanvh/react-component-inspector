@@ -57,9 +57,24 @@ export const useInspectionMetadata = (config: {
     setHoveredComponent(null, null);
   };
 
+  // Touch handlers for mobile
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (!isInspectionActive) return;
+    const target = e.currentTarget as HTMLElement;
+    setHoveredComponent(metadata, target);
+  };
+
+  const handleTouchEnd = () => {
+    if (!isInspectionActive) return;
+    // Don't clear on touch end - let autoInspection handle it
+    // This allows touch move to continue inspecting
+  };
+
   return {
     onMouseEnter: handleMouseEnter,
     onMouseLeave: handleMouseLeave,
+    onTouchStart: handleTouchStart,
+    onTouchEnd: handleTouchEnd,
     "data-inspection-id": metadata.componentId,
     "data-inspection-name": config.componentName,
   };

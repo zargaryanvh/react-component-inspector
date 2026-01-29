@@ -160,6 +160,136 @@ export const parseInspectionMetadata = (element: HTMLElement): ComponentMetadata
 };
 
 /**
+ * Helper function to inspect an element (used by both mouse and touch events)
+ */
+const inspectElement = (
+  target: HTMLElement,
+  isInspectionActive: boolean,
+  isLocked: boolean,
+  setHoveredComponent: (metadata: ComponentMetadata | null, element: HTMLElement | null) => void
+) => {
+  if (!isInspectionActive) {
+    return;
+  }
+
+  // If locked, don't update - keep current tooltip fixed
+  if (isLocked) {
+    return;
+  }
+
+  if (!target || !document.body.contains(target)) {
+    return;
+  }
+
+  // Always show inspection for any element (not just ones with metadata)
+  // Walk up the DOM tree to find a meaningful element to inspect
+  let current: HTMLElement | null = target;
+  let bestElement: HTMLElement | null = null;
+  let bestMetadata: ComponentMetadata | null = null;
+  let elementWithExplicitMetadata: HTMLElement | null = null;
+  let metadataWithExplicitId: ComponentMetadata | null = null;
+  
+  // Skip text nodes and very small elements
+  const isMeaningfulElement = (el: HTMLElement): boolean => {
+    const rect = el.getBoundingClientRect();
+    // Skip elements that are too small (likely text nodes or empty spans)
+    if (rect.width < 5 && rect.height < 5) {
+      return false;
+    }
+    // Prefer elements with explicit metadata, IDs, or meaningful classes
+    return !!(
+      el.getAttribute("data-inspection-name") ||
+      el.id ||
+      el.className ||
+      el.tagName !== "SPAN" && el.tagName !== "DIV"
+    );
+  };
+  
+  // First pass: Look for elements with explicit inspection metadata
+  // This ensures we always find the same component regardless of which child is hovered
+  while (current) {
+    // Ensure element is still in the DOM
+    if (!document.body.contains(current)) {
+      break;
+    }
+    
+    // Check if this element has explicit inspection metadata
+    const hasExplicitMetadata = current.getAttribute("data-inspection-name") && 
+                                 current.getAttribute("data-inspection-id");
+    
+    if (hasExplicitMetadata) {
+      const metadata = parseInspectionMetadata(current);
+      if (metadata) {
+        elementWithExplicitMetadata = current;
+        metadataWithExplicitId = metadata;
+        break; // Found explicit metadata, use it
+      }
+    }
+    
+    current = current.parentElement;
+    
+    // Stop at body to avoid inspecting the entire page
+    if (current && (current.tagName === "BODY" || current.tagName === "HTML")) {
+      break;
+    }
+  }
+  
+  // If we found explicit metadata, use it (this ensures consistent IDs)
+  if (elementWithExplicitMetadata && metadataWithExplicitId) {
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Inspection] Found element with explicit metadata:", metadataWithExplicitId.componentName);
+    }
+    setHoveredComponent(metadataWithExplicitId, elementWithExplicitMetadata);
+    return;
+  }
+  
+  // Second pass: If no explicit metadata found, look for meaningful elements
+  // Reset current to target for second pass
+  current = target;
+  
+  while (current) {
+    // Ensure element is still in the DOM
+    if (!document.body.contains(current)) {
+      break;
+    }
+    
+    // Check if this is a meaningful element
+    if (isMeaningfulElement(current)) {
+      const metadata = parseInspectionMetadata(current);
+      if (metadata) {
+        // Keep the first meaningful element (closest to target)
+        if (!bestElement) {
+          bestElement = current;
+          bestMetadata = metadata;
+        }
+      }
+    }
+    
+    current = current.parentElement;
+    
+    // Stop at body to avoid inspecting the entire page
+    if (current && (current.tagName === "BODY" || current.tagName === "HTML")) {
+      break;
+    }
+  }
+  
+  if (bestElement && bestMetadata) {
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Inspection] Found element:", bestMetadata.componentName);
+    }
+    setHoveredComponent(bestMetadata, bestElement);
+  } else {
+    // Fallback: show info for the target element itself
+    const fallbackMetadata = parseInspectionMetadata(target);
+    if (fallbackMetadata) {
+      setHoveredComponent(fallbackMetadata, target);
+    } else {
+      setHoveredComponent(null, null);
+    }
+  }
+};
+
+/**
  * Setup global mouse event listener for automatic inspection detection
  * This works with components that have data-inspection-* attributes
  */
@@ -172,6 +302,11 @@ export const setupAutoInspection = (
     return () => {}; // No-op in production
   }
 
+  // Detect if device supports touch
+  const isTouchDevice = 'ontouchstart' in window || 
+                        navigator.maxTouchPoints > 0 || 
+                        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
   const handleMouseMove = (e: MouseEvent) => {
     if (!isInspectionActive) {
       return;
@@ -183,115 +318,39 @@ export const setupAutoInspection = (
     }
 
     const target = e.target as HTMLElement;
-    if (!target || !document.body.contains(target)) {
+    inspectElement(target, isInspectionActive, isLocked, setHoveredComponent);
+  };
+
+  // Touch move handler for mobile devices
+  const handleTouchMove = (e: TouchEvent) => {
+    // Only process if inspection is active and we have touches
+    if (!isInspectionActive || e.touches.length === 0) {
       return;
     }
 
-    // Always show inspection for any element (not just ones with metadata)
-    // Walk up the DOM tree to find a meaningful element to inspect
-    let current: HTMLElement | null = target;
-    let bestElement: HTMLElement | null = null;
-    let bestMetadata: ComponentMetadata | null = null;
-    let elementWithExplicitMetadata: HTMLElement | null = null;
-    let metadataWithExplicitId: ComponentMetadata | null = null;
+    // Get the element under the first touch point
+    const touch = e.touches[0];
+    const target = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement;
     
-    // Skip text nodes and very small elements
-    const isMeaningfulElement = (el: HTMLElement): boolean => {
-      const rect = el.getBoundingClientRect();
-      // Skip elements that are too small (likely text nodes or empty spans)
-      if (rect.width < 5 && rect.height < 5) {
-        return false;
-      }
-      // Prefer elements with explicit metadata, IDs, or meaningful classes
-      return !!(
-        el.getAttribute("data-inspection-name") ||
-        el.id ||
-        el.className ||
-        el.tagName !== "SPAN" && el.tagName !== "DIV"
-      );
-    };
-    
-    // First pass: Look for elements with explicit inspection metadata
-    // This ensures we always find the same component regardless of which child is hovered
-    while (current) {
-      // Ensure element is still in the DOM
-      if (!document.body.contains(current)) {
-        break;
-      }
-      
-      // Check if this element has explicit inspection metadata
-      const hasExplicitMetadata = current.getAttribute("data-inspection-name") && 
-                                   current.getAttribute("data-inspection-id");
-      
-      if (hasExplicitMetadata) {
-        const metadata = parseInspectionMetadata(current);
-        if (metadata) {
-          elementWithExplicitMetadata = current;
-          metadataWithExplicitId = metadata;
-          break; // Found explicit metadata, use it
-        }
-      }
-      
-      current = current.parentElement;
-      
-      // Stop at body to avoid inspecting the entire page
-      if (current && (current.tagName === "BODY" || current.tagName === "HTML")) {
-        break;
-      }
+    if (target) {
+      inspectElement(target, isInspectionActive, isLocked, setHoveredComponent);
     }
-    
-    // If we found explicit metadata, use it (this ensures consistent IDs)
-    if (elementWithExplicitMetadata && metadataWithExplicitId) {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Inspection] Found element with explicit metadata:", metadataWithExplicitId.componentName);
-      }
-      setHoveredComponent(metadataWithExplicitId, elementWithExplicitMetadata);
+  };
+
+  // Touch start handler for mobile - inspect on touch
+  const handleTouchStart = (e: TouchEvent) => {
+    // Only process if inspection is active and we have touches
+    // Skip if it's a 3-finger touch (used for activation)
+    if (!isInspectionActive || e.touches.length === 3) {
       return;
     }
+
+    // Get the element under the first touch point
+    const touch = e.touches[0];
+    const target = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement;
     
-    // Second pass: If no explicit metadata found, look for meaningful elements
-    // Reset current to target for second pass
-    current = target;
-    
-    while (current) {
-      // Ensure element is still in the DOM
-      if (!document.body.contains(current)) {
-        break;
-      }
-      
-      // Check if this is a meaningful element
-      if (isMeaningfulElement(current)) {
-        const metadata = parseInspectionMetadata(current);
-        if (metadata) {
-          // Keep the first meaningful element (closest to target)
-          if (!bestElement) {
-            bestElement = current;
-            bestMetadata = metadata;
-          }
-        }
-      }
-      
-      current = current.parentElement;
-      
-      // Stop at body to avoid inspecting the entire page
-      if (current && (current.tagName === "BODY" || current.tagName === "HTML")) {
-        break;
-      }
-    }
-    
-    if (bestElement && bestMetadata) {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Inspection] Found element:", bestMetadata.componentName);
-      }
-      setHoveredComponent(bestMetadata, bestElement);
-    } else {
-      // Fallback: show info for the target element itself
-      const fallbackMetadata = parseInspectionMetadata(target);
-      if (fallbackMetadata) {
-        setHoveredComponent(fallbackMetadata, target);
-      } else {
-        setHoveredComponent(null, null);
-      }
+    if (target) {
+      inspectElement(target, isInspectionActive, isLocked, setHoveredComponent);
     }
   };
 
@@ -301,11 +360,32 @@ export const setupAutoInspection = (
     }
   };
 
+  const handleTouchEnd = () => {
+    // Clear inspection on touch end (unless locked)
+    if (isInspectionActive && !isLocked) {
+      setHoveredComponent(null, null);
+    }
+  };
+
+  // Add mouse event listeners
   window.addEventListener("mousemove", handleMouseMove);
   document.addEventListener("mouseleave", handleMouseLeave);
+
+  // Add touch event listeners for mobile devices
+  if (isTouchDevice) {
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+  }
 
   return () => {
     window.removeEventListener("mousemove", handleMouseMove);
     document.removeEventListener("mouseleave", handleMouseLeave);
+    
+    if (isTouchDevice) {
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchend", handleTouchEnd);
+    }
   };
 };
