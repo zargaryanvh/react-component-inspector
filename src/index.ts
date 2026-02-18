@@ -12,6 +12,9 @@ export {
   formatMetadataForClipboard,
   formatMarginForClipboard,
   formatPaddingForClipboard,
+  formatGapForClipboard,
+  getParentWithGap,
+  getAncestorsWithMargin,
   getComponentName,
   getNextInstanceIndex
 } from './inspection';

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Box, Paper, Typography, IconButton, Tooltip as MuiTooltip, Divider, Menu, MenuItem } from "@mui/material";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { useInspection, ComponentMetadata } from "./InspectionContext";
-import { formatMetadataForClipboard } from "./inspection";
+import { formatMetadataForClipboard, getParentWithGap } from "./inspection";
+import { parseInspectionMetadata } from "./autoInspection";
 import type { CopyType } from "./inspection";
 
 /**
@@ -345,7 +346,34 @@ export const InspectionTooltip: React.FC = () => {
   };
 
   const handleCopy = (type: CopyType) => {
-    if (!displayComponent || !hoveredElement) return;
+    if (!hoveredElement) return;
+    if (type === "gap") {
+      const parentWithGap = getParentWithGap(hoveredElement);
+      if (!parentWithGap) return;
+      const metadata = parseInspectionMetadata(parentWithGap);
+      if (!metadata) return;
+      setCopyMenuAnchor(null);
+      const text = formatMetadataForClipboard(metadata, parentWithGap, "gap");
+      const showCopied = () => {
+        setCopied("gap");
+        setTimeout(() => setCopied(null), 2000);
+      };
+      const useFallbackFirst = isMobile || ("ontouchstart" in window);
+      if (useFallbackFirst) {
+        if (fallbackCopy(text)) showCopied();
+        else if (typeof navigator.clipboard?.writeText === "function") {
+          navigator.clipboard.writeText(text).then(showCopied, () => {});
+        }
+      } else if (typeof navigator.clipboard?.writeText === "function") {
+        navigator.clipboard.writeText(text).then(showCopied, () => {
+          if (fallbackCopy(text)) showCopied();
+        });
+      } else {
+        if (fallbackCopy(text)) showCopied();
+      }
+      return;
+    }
+    if (!displayComponent) return;
     setCopyMenuAnchor(null);
 
     const text = formatMetadataForClipboard(displayComponent as ComponentMetadata, hoveredElement, type);
@@ -384,6 +412,8 @@ export const InspectionTooltip: React.FC = () => {
       setCopyMenuAnchor(null);
     }
   }, [tooltipVisible]);
+
+  const parentWithGap = hoveredElement ? getParentWithGap(hoveredElement) : null;
 
   // Show tooltip when inspection active; on mobile only when locked (H pressed or double-tap)
   if (!isInspectionActive || !displayComponent) {
@@ -478,6 +508,7 @@ export const InspectionTooltip: React.FC = () => {
                   cursor: "pointer",
                   background: "none",
                   border: "none",
+                  borderRight: parentWithGap ? "1px solid rgba(255,255,255,0.25)" : "none",
                   padding: "4px 6px",
                   fontFamily: "inherit",
                   minWidth: 44,
@@ -485,6 +516,26 @@ export const InspectionTooltip: React.FC = () => {
               >
                 Padding
               </Typography>
+              {parentWithGap && (
+                <Typography
+                  component="button"
+                  type="button"
+                  variant="caption"
+                  onPointerDown={(e) => { e.preventDefault(); handleCopy("gap"); }}
+                  sx={{
+                    color: copied === "gap" ? "#4caf50" : "rgba(156, 39, 176, 0.95)",
+                    fontSize: "0.65rem",
+                    cursor: "pointer",
+                    background: "none",
+                    border: "none",
+                    padding: "4px 6px",
+                    fontFamily: "inherit",
+                    minWidth: 44,
+                  }}
+                >
+                  Gap
+                </Typography>
+              )}
             </Box>
           </Box>
         ) : (
@@ -520,6 +571,11 @@ export const InspectionTooltip: React.FC = () => {
               <MenuItem onClick={() => handleCopy("padding")} sx={{ color: "#fff", fontSize: "0.8rem" }}>
                 Copy Padding
               </MenuItem>
+              {parentWithGap && (
+                <MenuItem onClick={() => handleCopy("gap")} sx={{ color: "#9c27b0", fontSize: "0.8rem" }}>
+                  Copy Gap (parent)
+                </MenuItem>
+              )}
             </Menu>
           </>
         )}
@@ -553,6 +609,13 @@ export const InspectionTooltip: React.FC = () => {
                   <Typography variant="caption" sx={{ color: "#4caf50", fontSize: "0.7rem" }}>Padding</Typography>
                   <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.6)", fontSize: "0.65rem" }}>(inside)</Typography>
                 </Box>
+                {parentWithGap && (
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                    <Box sx={{ width: 12, height: 12, borderRadius: "2px", backgroundColor: "rgba(156, 39, 176, 0.4)", border: "1px dashed #7b1fa2" }} />
+                    <Typography variant="caption" sx={{ color: "#9c27b0", fontSize: "0.7rem" }}>Gap</Typography>
+                    <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.6)", fontSize: "0.65rem" }}>(parent)</Typography>
+                  </Box>
+                )}
               </Box>
               <Box sx={{ display: "flex", gap: 1.5, mt: 0.5, flexWrap: "wrap" }}>
                 <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.7)", fontSize: "0.65rem" }}>
@@ -562,6 +625,14 @@ export const InspectionTooltip: React.FC = () => {
                   <strong>Padding:</strong> {pt} {pr} {pb} {pl}
                 </Typography>
               </Box>
+              {(mt === "0px" || parseFloat(mt) === 0) &&
+               (mr === "0px" || parseFloat(mr) === 0) &&
+               (mb === "0px" || parseFloat(mb) === 0) &&
+               (ml === "0px" || parseFloat(ml) === 0) && (
+                <Typography variant="caption" sx={{ color: "#ff9800", fontSize: "0.6rem", display: "block", mt: 0.5 }}>
+                  No margin on this element. Dashed orange outlines = ancestors with margin. Click one to inspect.
+                </Typography>
+              )}
             </Box>
           );
         } catch {

@@ -45,7 +45,69 @@ export const buildUsagePath = (hierarchy: string[]): string => {
   return hierarchy.join(" > ");
 };
 
-export type CopyType = "component" | "margin" | "padding";
+export type CopyType = "component" | "margin" | "padding" | "gap";
+
+/**
+ * Parse CSS value to numeric pixels (0 if none)
+ */
+const parseGapPx = (value: string): number => {
+  if (!value || value === "0" || value === "normal") return 0;
+  const num = parseFloat(value);
+  if (value.endsWith("px")) return num;
+  if (value.endsWith("em") || value.endsWith("rem")) return num * 16;
+  return num;
+};
+
+/**
+ * Get parent element that has flex/grid layout with non-zero gap
+ */
+export const getParentWithGap = (element: HTMLElement): HTMLElement | null => {
+  const parent = element.parentElement;
+  if (!parent || parent === document.body) return null;
+  try {
+    const cs = window.getComputedStyle(parent);
+    const display = cs.display || "";
+    const isFlex = display.includes("flex");
+    const isGrid = display.includes("grid");
+    if (!isFlex && !isGrid) return null;
+    const gap = parseGapPx(cs.gap);
+    const rowGap = parseGapPx(cs.rowGap);
+    const columnGap = parseGapPx(cs.columnGap);
+    if (gap > 0 || rowGap > 0 || columnGap > 0) return parent;
+  } catch {
+    /* ignore */
+  }
+  return null;
+};
+
+/**
+ * Get ancestors with non-zero margin (closest first, up to maxCount)
+ */
+export const getAncestorsWithMargin = (
+  element: HTMLElement,
+  maxCount: number = 2
+): Array<{ element: HTMLElement; mt: number; mr: number; mb: number; ml: number }> => {
+  const result: Array<{ element: HTMLElement; mt: number; mr: number; mb: number; ml: number }> = [];
+  let current: HTMLElement | null = element.parentElement;
+  let count = 0;
+  while (current && current !== document.body && count < maxCount) {
+    try {
+      const cs = window.getComputedStyle(current);
+      const mt = parseGapPx(cs.marginTop);
+      const mr = parseGapPx(cs.marginRight);
+      const mb = parseGapPx(cs.marginBottom);
+      const ml = parseGapPx(cs.marginLeft);
+      if (mt > 0 || mr > 0 || mb > 0 || ml > 0) {
+        result.push({ element: current, mt, mr, mb, ml });
+        count++;
+      }
+    } catch {
+      /* ignore */
+    }
+    current = current.parentElement;
+  }
+  return result;
+};
 
 /**
  * Build DOM path from body to element (helps Cursor identify exact element)
@@ -86,39 +148,42 @@ const buildParentInfo = (element: HTMLElement): string | null => {
 /**
  * Build role/disambiguation (outer vs inner, position in tree)
  */
-const buildRoleInTree = (element: HTMLElement, type: "margin" | "padding"): string => {
+const buildRoleInTree = (element: HTMLElement, type: "margin" | "padding" | "component"): string => {
   const parent = element.parentElement;
   const children = element.children;
   const childCount = Array.from(children).length;
-  const cs = window.getComputedStyle(element);
-
-  // Check if this element has children with similar padding/margin (common confusion: parent vs child)
-  let similarChildren = 0;
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i] as HTMLElement;
-    if (child.getBoundingClientRect().width < 2 || child.getBoundingClientRect().height < 2) continue;
-    const childCs = window.getComputedStyle(child);
-    if (type === "padding") {
-      const same =
-        childCs.paddingTop === cs.paddingTop &&
-        childCs.paddingBottom === cs.paddingBottom &&
-        childCs.paddingLeft === cs.paddingLeft &&
-        childCs.paddingRight === cs.paddingRight;
-      if (same) similarChildren++;
-    } else {
-      const same =
-        childCs.marginTop === cs.marginTop &&
-        childCs.marginBottom === cs.marginBottom &&
-        childCs.marginLeft === cs.marginLeft &&
-        childCs.marginRight === cs.marginRight;
-      if (same) similarChildren++;
-    }
-  }
 
   const parts: string[] = [];
   if (childCount > 0) parts.push(`has ${childCount} child element(s)`);
-  if (similarChildren > 0)
-    parts.push(`WARNING: ${similarChildren} direct child(ren) have similar ${type} - make sure you change THIS element (the parent), not a child`);
+
+  // For margin/padding: warn if children have similar values (common confusion: parent vs child)
+  if (type !== "component") {
+    const cs = window.getComputedStyle(element);
+    let similarChildren = 0;
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i] as HTMLElement;
+      if (child.getBoundingClientRect().width < 2 || child.getBoundingClientRect().height < 2) continue;
+      const childCs = window.getComputedStyle(child);
+      if (type === "padding") {
+        const same =
+          childCs.paddingTop === cs.paddingTop &&
+          childCs.paddingBottom === cs.paddingBottom &&
+          childCs.paddingLeft === cs.paddingLeft &&
+          childCs.paddingRight === cs.paddingRight;
+        if (same) similarChildren++;
+      } else {
+        const same =
+          childCs.marginTop === cs.marginTop &&
+          childCs.marginBottom === cs.marginBottom &&
+          childCs.marginLeft === cs.marginLeft &&
+          childCs.marginRight === cs.marginRight;
+        if (same) similarChildren++;
+      }
+    }
+    if (similarChildren > 0)
+      parts.push(`WARNING: ${similarChildren} direct child(ren) have similar ${type} - make sure you change THIS element (the parent), not a child`);
+  }
+
   if (parent && parent !== document.body) {
     const parentDesc = buildParentInfo(element);
     if (parentDesc) parts.push(`parent: ${parentDesc}`);
@@ -191,8 +256,30 @@ export const formatMetadataForClipboard = (metadata: ComponentMetadata, element:
   lines.push(``);
   
   if (type === "component") {
+    const rect = element.getBoundingClientRect();
     lines.push(`=== ELEMENT IDENTIFICATION ===`);
     lines.push(...buildElementIdentification(metadata, element));
+    lines.push(``);
+    // DOM path and targeting info - so Cursor finds the correct element
+    lines.push(`DOM Path: ${buildDomPath(element)}`);
+    const parentInfo = buildParentInfo(element);
+    if (parentInfo) lines.push(`Parent: ${parentInfo}`);
+    lines.push(`Role in tree: ${buildRoleInTree(element, "component")}`);
+    lines.push(``);
+    lines.push(`=== TARGET (use this to instruct Cursor) ===`);
+    const classNameStr = element.className ? (typeof element.className === "string" ? element.className : String(element.className)) : "";
+    const firstClass = classNameStr.split(/\s+/).find((c) => c && (c.startsWith("Mui") || c.startsWith("css-")));
+    const desc = firstClass ? `${metadata.componentName} with class ${firstClass}` : metadata.componentName;
+    lines.push(`TARGET: The ${desc} - position (${Math.round(rect.left)}, ${Math.round(rect.top)}), size ${Math.round(rect.width)}x${Math.round(rect.height)}px. It is the element in the DOM path above, NOT a child.`);
+    lines.push(``);
+    lines.push(`=== HOW TO FIND AND MODIFY THIS COMPONENT IN CODE ===`);
+    lines.push(`1. Use the DOM Path to locate the correct element - do NOT change a child if the path shows this element is the parent.`);
+    if (metadata.sourceFile !== "DOM") {
+      lines.push(`2. Open ${metadata.sourceFile} and find the component that renders this element.`);
+    } else {
+      lines.push(`2. Search for the parent component that renders this layout. Look for the component in Usage Path or by Element Text/Label.`);
+    }
+    lines.push(`3. Modify the component's props, sx, or styles as needed.`);
     lines.push(``);
     lines.push(`=== COMPONENT METADATA ===`);
     if (metadata.variant) lines.push(`Variant: ${metadata.variant}`);
@@ -200,7 +287,6 @@ export const formatMetadataForClipboard = (metadata: ComponentMetadata, element:
     lines.push(`Instance: ${metadata.instanceIndex}`);
     lines.push(`Props: ${metadata.propsSignature}`);
     lines.push(``);
-    const rect = element.getBoundingClientRect();
     lines.push(`Position: (${Math.round(rect.left)}, ${Math.round(rect.top)})`);
     lines.push(`Size: ${Math.round(rect.width)}x${Math.round(rect.height)}px`);
   } else if (type === "margin" || type === "padding") {
@@ -261,6 +347,38 @@ export const formatMetadataForClipboard = (metadata: ComponentMetadata, element:
       }
       lines.push(`3. Change padding: sx={{ padding: 0 }} or p: "4px" or pt: 1, pr: 1, pb: 1, pl: 1 (MUI theme spacing). To change from 16px to 4px: use p: 0.5 (4px) or padding: "4px".`);
     }
+  } else if (type === "gap") {
+    const cs = window.getComputedStyle(element);
+    const gap = getCssValue(cs.gap);
+    const rowGap = getCssValue(cs.rowGap);
+    const columnGap = getCssValue(cs.columnGap);
+    lines.push(`=== ELEMENT IDENTIFICATION ===`);
+    lines.push(`Element Type: ${element.tagName.toLowerCase()} (flex/grid container)`);
+    lines.push(`DOM Path: ${buildDomPath(element)}`);
+    const parentInfo = buildParentInfo(element);
+    if (parentInfo) lines.push(`Parent: ${parentInfo}`);
+    lines.push(`Component Name: ${metadata.componentName}`);
+    lines.push(`Source File: ${metadata.sourceFile}`);
+    lines.push(``);
+    lines.push(`=== CURRENT GAP VALUES ===`);
+    lines.push(`gap: ${gap}`);
+    if (rowGap !== gap) lines.push(`row-gap: ${rowGap}`);
+    if (columnGap !== gap) lines.push(`column-gap: ${columnGap}`);
+    lines.push(``);
+    lines.push(`=== TARGET (use this to instruct Cursor) ===`);
+    const classNameStr = element.className ? (typeof element.className === "string" ? element.className : String(element.className)) : "";
+    const firstClass = classNameStr.split(/\s+/).find((c) => c && (c.startsWith("Mui") || c.startsWith("css-")));
+    const desc = firstClass ? `${metadata.componentName} with class ${firstClass}` : metadata.componentName;
+    lines.push(`TARGET: The ${desc} - the flex/grid container with gap ${gap}. It is the PARENT in the DOM path above.`);
+    lines.push(``);
+    lines.push(`=== HOW TO FIND AND MODIFY GAP IN CODE ===`);
+    lines.push(`1. Use the DOM Path to locate the flex/grid container.`);
+    if (metadata.sourceFile !== "DOM") {
+      lines.push(`2. Open ${metadata.sourceFile} and find the component that renders this element.`);
+    } else {
+      lines.push(`2. Search for the component that renders this layout (Box, Stack, Grid, etc.).`);
+    }
+    lines.push(`3. Change gap: sx={{ gap: 1 }} or gap: "8px" or rowGap/columnGap (MUI theme spacing).`);
   }
   
   return lines.join("\n");
@@ -278,6 +396,13 @@ export const formatMarginForClipboard = (metadata: ComponentMetadata, element: H
  */
 export const formatPaddingForClipboard = (metadata: ComponentMetadata, element: HTMLElement): string => {
   return formatMetadataForClipboard(metadata, element, "padding");
+};
+
+/**
+ * Format gap info for clipboard (alias for formatMetadataForClipboard with type="gap")
+ */
+export const formatGapForClipboard = (metadata: ComponentMetadata, element: HTMLElement): string => {
+  return formatMetadataForClipboard(metadata, element, "gap");
 };
 
 /**
