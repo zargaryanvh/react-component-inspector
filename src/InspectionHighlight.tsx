@@ -18,34 +18,50 @@ const parsePx = (value: string): number => {
  * When hold CTRL+M: orange = margin, green = padding (hold-to-use, release to exit)
  * Otherwise: blue outline for component
  */
+const stripStyle = (left: number, top: number, width: number, height: number, color: string, bg: string): React.CSSProperties => ({
+  position: "fixed",
+  left: `${left}px`,
+  top: `${top}px`,
+  width: `${Math.max(0, width)}px`,
+  height: `${Math.max(0, height)}px`,
+  pointerEvents: "none",
+  border: `2px solid ${color}`,
+  backgroundColor: bg,
+  boxSizing: "border-box",
+});
+
 export const InspectionHighlight: React.FC = () => {
   const { isInspectionActive, isMarginPaddingMode, hoveredElement } = useInspection();
   const [highlightStyle, setHighlightStyle] = useState<React.CSSProperties | null>(null);
-  const [marginStyle, setMarginStyle] = useState<React.CSSProperties | null>(null);
-  const [paddingStyle, setPaddingStyle] = useState<React.CSSProperties | null>(null);
+  const [marginStrips, setMarginStrips] = useState<React.CSSProperties[]>([]);
+  const [paddingStrips, setPaddingStrips] = useState<React.CSSProperties[]>([]);
+  const [elementOutlineStyle, setElementOutlineStyle] = useState<React.CSSProperties | null>(null);
 
   useEffect(() => {
     // Show when CTRL is held (inspection active)
     const shouldShow = isInspectionActive;
     if (!shouldShow) {
       setHighlightStyle(null);
-      setMarginStyle(null);
-      setPaddingStyle(null);
+      setMarginStrips([]);
+      setPaddingStrips([]);
+      setElementOutlineStyle(null);
       return;
     }
     
     if (!hoveredElement) {
       setHighlightStyle(null);
-      setMarginStyle(null);
-      setPaddingStyle(null);
+      setMarginStrips([]);
+      setPaddingStrips([]);
+      setElementOutlineStyle(null);
       return;
     }
 
     const updateHighlight = () => {
       if (!document.body.contains(hoveredElement)) {
         setHighlightStyle(null);
-        setMarginStyle(null);
-        setPaddingStyle(null);
+        setMarginStrips([]);
+        setPaddingStrips([]);
+        setElementOutlineStyle(null);
         return;
       }
 
@@ -71,10 +87,11 @@ export const InspectionHighlight: React.FC = () => {
             borderRadius: "2px",
             transition: "all 0.1s ease-out",
           });
-          setMarginStyle(null);
-          setPaddingStyle(null);
+          setMarginStrips([]);
+          setPaddingStrips([]);
+          setElementOutlineStyle(null);
         } else {
-          // Margin/padding mode: orange margin, green padding
+          // Margin/padding mode: draw margin as 4 strips (outside), element outline, padding as 4 strips (inside)
           setHighlightStyle(null);
           const cs = window.getComputedStyle(hoveredElement);
           const mt = parsePx(cs.marginTop);
@@ -90,61 +107,51 @@ export const InspectionHighlight: React.FC = () => {
           const bb = parsePx(cs.borderBottomWidth);
           const bl = parsePx(cs.borderLeftWidth);
 
-          const hasMargin = mt > 0 || mr > 0 || mb > 0 || ml > 0;
-          const hasPadding = pt > 0 || pr > 0 || pb > 0 || pl > 0;
+          const w = rect.width;
+          const h = rect.height;
+          const M_ORANGE = "#e65100";
+          const M_BG = "rgba(255, 152, 0, 0.4)";
+          const P_GREEN = "#2e7d32";
+          const P_BG = "rgba(76, 175, 80, 0.4)";
 
-          // Margin box (outside element) - orange; only show if any margin is non-zero
-          if (hasMargin) {
-            const mlLeft = left - ml;
-            const mlTop = top - mt;
-            const marginWidth = rect.width + ml + mr;
-            const marginHeight = rect.height + mt + mb;
-            setMarginStyle({
-              position: "fixed",
-              left: `${mlLeft}px`,
-              top: `${mlTop}px`,
-              width: `${marginWidth}px`,
-              height: `${marginHeight}px`,
-              pointerEvents: "none",
-              zIndex: 999997,
-              border: "2px solid #ff9800",
-              backgroundColor: "rgba(255, 152, 0, 0.08)",
-              boxShadow: "0 0 0 1px rgba(255, 152, 0, 0.4)",
-              borderRadius: "2px",
-              transition: "all 0.1s ease-out",
-            });
-          } else {
-            setMarginStyle(null);
-          }
+          // Element border box outline so you see the full outside size of the element
+          setElementOutlineStyle({
+            position: "fixed",
+            left: `${left}px`,
+            top: `${top}px`,
+            width: `${w}px`,
+            height: `${h}px`,
+            pointerEvents: "none",
+            zIndex: 999998,
+            border: "2px solid rgba(255,255,255,0.6)",
+            boxSizing: "border-box",
+          });
 
-          // Padding box (inside element, after border) - green; only show if any padding is non-zero
-          if (hasPadding) {
-            const padLeft = left + bl + pl;
-            const padTop = top + bt + pt;
-            const padWidth = Math.max(0, rect.width - bl - br - pl - pr);
-            const padHeight = Math.max(0, rect.height - bt - bb - pt - pb);
-            setPaddingStyle({
-              position: "fixed",
-              left: `${padLeft}px`,
-              top: `${padTop}px`,
-              width: `${padWidth}px`,
-              height: `${padHeight}px`,
-              pointerEvents: "none",
-              zIndex: 999998,
-              border: "2px solid #4caf50",
-              backgroundColor: "rgba(76, 175, 80, 0.08)",
-              boxShadow: "0 0 0 1px rgba(76, 175, 80, 0.4)",
-              borderRadius: "2px",
-              transition: "all 0.1s ease-out",
-            });
-          } else {
-            setPaddingStyle(null);
-          }
+          // Margin: 4 strips only (the actual margin space outside the element), so the outside size is visible
+          const marginStripsList: React.CSSProperties[] = [];
+          if (mt > 0) marginStripsList.push(stripStyle(left - ml, top - mt, w + ml + mr, mt, M_ORANGE, M_BG));
+          if (mb > 0) marginStripsList.push(stripStyle(left - ml, top + h, w + ml + mr, mb, M_ORANGE, M_BG));
+          if (ml > 0) marginStripsList.push(stripStyle(left - ml, top, ml, h, M_ORANGE, M_BG));
+          if (mr > 0) marginStripsList.push(stripStyle(left + w, top, mr, h, M_ORANGE, M_BG));
+          setMarginStrips(marginStripsList);
+
+          // Padding: 4 strips only (the actual padding space inside the border)
+          const paddingStripsList: React.CSSProperties[] = [];
+          const innerLeft = left + bl;
+          const innerTop = top + bt;
+          const innerW = w - bl - br;
+          const innerH = h - bt - bb;
+          if (pt > 0) paddingStripsList.push(stripStyle(innerLeft, innerTop, innerW, pt, P_GREEN, P_BG));
+          if (pb > 0) paddingStripsList.push(stripStyle(innerLeft, innerTop + innerH - pb, innerW, pb, P_GREEN, P_BG));
+          if (pl > 0) paddingStripsList.push(stripStyle(innerLeft, innerTop, pl, innerH, P_GREEN, P_BG));
+          if (pr > 0) paddingStripsList.push(stripStyle(innerLeft + innerW - pr, innerTop, pr, innerH, P_GREEN, P_BG));
+          setPaddingStrips(paddingStripsList);
         }
       } catch (error) {
         setHighlightStyle(null);
-        setMarginStyle(null);
-        setPaddingStyle(null);
+        setMarginStrips([]);
+        setPaddingStrips([]);
+        setElementOutlineStyle(null);
       }
     };
 
@@ -159,14 +166,15 @@ export const InspectionHighlight: React.FC = () => {
     };
   }, [isInspectionActive, isMarginPaddingMode, hoveredElement]);
 
-  const showContent = isInspectionActive && (highlightStyle || marginStyle || paddingStyle);
+  const showContent = isInspectionActive && (highlightStyle || marginStrips.length > 0 || paddingStrips.length > 0 || elementOutlineStyle);
 
   if (!showContent) return null;
 
   return (
     <>
-      {marginStyle && <Box sx={marginStyle} />}
-      {paddingStyle && <Box sx={paddingStyle} />}
+      {marginStrips.map((s, i) => <Box key={`m-${i}`} sx={{ ...s, zIndex: 999997 }} />)}
+      {paddingStrips.map((s, i) => <Box key={`p-${i}`} sx={{ ...s, zIndex: 999998 }} />)}
+      {elementOutlineStyle && <Box sx={elementOutlineStyle} />}
       {highlightStyle && <Box sx={highlightStyle} />}
     </>
   );

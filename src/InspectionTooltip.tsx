@@ -525,6 +525,55 @@ export const InspectionTooltip: React.FC = () => {
         )}
       </Box>
 
+      {/* When in margin/padding mode: show legend so user knows which highlight is which */}
+      {isMarginPaddingMode && hoveredElement && (() => {
+        try {
+          const cs = window.getComputedStyle(hoveredElement);
+          const mt = cs.marginTop;
+          const mr = cs.marginRight;
+          const mb = cs.marginBottom;
+          const ml = cs.marginLeft;
+          const pt = cs.paddingTop;
+          const pr = cs.paddingRight;
+          const pb = cs.paddingBottom;
+          const pl = cs.paddingLeft;
+          return (
+            <Box sx={{ mb: 1, p: 0.75, borderRadius: 1, backgroundColor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}>
+              <Typography variant="caption" sx={{ fontWeight: 600, color: "rgba(255,255,255,0.95)", display: "block", mb: 0.5 }}>
+                Highlight legend
+              </Typography>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  <Box sx={{ width: 12, height: 12, borderRadius: "2px", backgroundColor: "rgba(255, 152, 0, 0.5)", border: "1px solid #e65100" }} />
+                  <Typography variant="caption" sx={{ color: "#ff9800", fontSize: "0.7rem" }}>Margin</Typography>
+                  <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.6)", fontSize: "0.65rem" }}>(outside)</Typography>
+                </Box>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  <Box sx={{ width: 12, height: 12, borderRadius: "2px", backgroundColor: "rgba(76, 175, 80, 0.5)", border: "1px solid #2e7d32" }} />
+                  <Typography variant="caption" sx={{ color: "#4caf50", fontSize: "0.7rem" }}>Padding</Typography>
+                  <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.6)", fontSize: "0.65rem" }}>(inside)</Typography>
+                </Box>
+              </Box>
+              <Box sx={{ display: "flex", gap: 1.5, mt: 0.5, flexWrap: "wrap" }}>
+                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.7)", fontSize: "0.65rem" }}>
+                  <strong>Margin:</strong> {mt} {mr} {mb} {ml}
+                </Typography>
+                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.7)", fontSize: "0.65rem" }}>
+                  <strong>Padding:</strong> {pt} {pr} {pb} {pl}
+                </Typography>
+              </Box>
+            </Box>
+          );
+        } catch {
+          return (
+            <Box sx={{ mb: 1, p: 0.75, borderRadius: 1, backgroundColor: "rgba(255,255,255,0.06)" }}>
+              <Typography variant="caption" sx={{ color: "#ff9800" }}>Orange = Margin (outside)</Typography>
+              <Typography variant="caption" sx={{ color: "#4caf50", display: "block" }}>Green = Padding (inside)</Typography>
+            </Box>
+          );
+        }
+      })()}
+
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
         {/* Component Name Header */}
         <Typography variant="body2" sx={{ color: "#fff", fontWeight: 500, mb: 0.5 }}>
