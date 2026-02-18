@@ -160,6 +160,20 @@ export const parseInspectionMetadata = (element: HTMLElement): ComponentMetadata
 };
 
 /**
+ * Inspect element at screen coordinates - used to start inspection immediately on mobile activation
+ */
+export const inspectAtPoint = (
+  clientX: number,
+  clientY: number,
+  setHoveredComponent: (metadata: ComponentMetadata | null, element: HTMLElement | null) => void
+): void => {
+  const target = document.elementFromPoint(clientX, clientY) as HTMLElement;
+  if (target && document.body.contains(target)) {
+    inspectElement(target, true, false, setHoveredComponent);
+  }
+};
+
+/**
  * Helper function to inspect an element (used by both mouse and touch events)
  */
 const inspectElement = (

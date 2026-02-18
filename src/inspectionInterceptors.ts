@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Interceptors to block API and Firebase requests when CTRL is pressed
  * Only active in development
  */
@@ -37,8 +37,12 @@ export const setupFetchInterceptor = (): void => {
 
   window.fetch = async (...args: Parameters<typeof fetch>): Promise<Response> => {
     if (shouldBlockRequest()) {
+      const url = typeof args[0] === "string" ? args[0] : (args[0] as Request)?.url ?? "";
+      // Never block health/connection checks so the app doesn't report "connection lost"
+      if (url.includes("/health") || url.includes("health?")) {
+        return originalFetch(...args);
+      }
       console.warn("[Inspection] Blocked API request (CTRL held):", args[0]);
-      // Return a rejected promise to prevent the request
       return Promise.reject(new Error("Request blocked: Inspection mode active (CTRL held)"));
     }
     return originalFetch(...args);

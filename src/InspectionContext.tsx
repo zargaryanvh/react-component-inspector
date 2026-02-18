@@ -20,8 +20,10 @@ export interface ComponentMetadata {
  * Inspection context state
  */
 interface InspectionState {
-  isInspectionActive: boolean; // CTRL is pressed
-  isLocked: boolean; // CTRL+H pressed - tooltip is locked and won't update on mouse move
+  isInspectionActive: boolean;
+  isLocked: boolean;
+  isMobile: boolean; // Touch device - tooltip only shown when locked (H or double-tap)
+  isMarginPaddingMode: boolean;
   hoveredComponent: ComponentMetadata | null;
   hoveredElement: HTMLElement | null;
   setHoveredComponent: (component: ComponentMetadata | null, element: HTMLElement | null) => void;
@@ -33,24 +35,25 @@ const InspectionContext = createContext<InspectionState | undefined>(undefined);
  * Inspection Provider - Only active in development
  */
 export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [isInspectionActive, setIsInspectionActive] = useState(false);
+  const [ctrlHeld, setCtrlHeld] = useState(false);
+  const [isStickyInspection, setIsStickyInspection] = useState(false);
+  const isInspectionActive = ctrlHeld || isStickyInspection;
   const [isLocked, setIsLocked] = useState(false);
+  const [isMarginPaddingMode, setIsMarginPaddingMode] = useState(false);
   const [hoveredComponent, setHoveredComponentState] = useState<ComponentMetadata | null>(null);
   const [hoveredElement, setHoveredElement] = useState<HTMLElement | null>(null);
 
   // Use refs to always access latest state values in event handlers
   const isInspectionActiveRef = useRef(isInspectionActive);
   const isLockedRef = useRef(isLocked);
+  const isStickyInspectionRef = useRef(isStickyInspection);
   const hoveredComponentRef = useRef(hoveredComponent);
-  const hKeyPressedRef = useRef(false); // Track if H key is currently being held
+  const hKeyPressedRef = useRef(false);
   
-  // Mobile touch support
-  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const touchStartTimeRef = useRef<number>(0);
+  // Touch support for locking only (3/4 finger activation removed - use Ctrl+Shift+R on laptop)
   const lastTapRef = useRef<number>(0);
-  const isMobileRef = useRef(false);
+  const [isMobile, setIsMobile] = useState(false);
 
-  // Detect mobile device
   useEffect(() => {
     const checkMobile = () => {
       if (typeof window === 'undefined') return false;
@@ -58,7 +61,7 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
              navigator.maxTouchPoints > 0 || 
              /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     };
-    isMobileRef.current = checkMobile();
+    setIsMobile(checkMobile());
   }, []);
 
   // Keep refs in sync with state
@@ -74,93 +77,75 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
     hoveredComponentRef.current = hoveredComponent;
   }, [hoveredComponent]);
 
+  useEffect(() => {
+    isStickyInspectionRef.current = isStickyInspection;
+  }, [isStickyInspection]);
+
+  // Only block API/fetch when CTRL is physically held (not when sticky inspection is on)
+  useEffect(() => {
+    setInspectionActive(ctrlHeld);
+  }, [ctrlHeld]);
+
   // Mobile touch handlers for activation and locking
   React.useEffect(() => {
     if (process.env.NODE_ENV !== "development") {
       return; // Only in development
     }
 
-    // Long-press to activate inspection mode (mobile)
-    const handleTouchStart = (e: TouchEvent) => {
-      if (!isMobileRef.current) return;
-      
-      // Only activate if touching with 3 fingers (to avoid accidental activation)
-      if (e.touches.length === 3) {
-        touchStartTimeRef.current = Date.now();
-        
-        longPressTimerRef.current = setTimeout(() => {
-          setIsInspectionActive(true);
-          setInspectionActive(true);
-          if (process.env.NODE_ENV === "development") {
-            console.log("[Inspection] Activated (mobile) - Long-press with 3 fingers. Double-tap tooltip to lock.");
-          }
-        }, 800); // 800ms long-press
-      }
-    };
-
+    // Double-tap for locking tooltip (touch devices)
     const handleTouchEnd = (e: TouchEvent) => {
-      if (!isMobileRef.current) return;
-      
-      // Clear long-press timer
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current);
-        longPressTimerRef.current = null;
-      }
-
-      // Double-tap detection for locking (on tooltip or component)
+      if (!('ontouchstart' in window) && navigator.maxTouchPoints === 0) return;
       const now = Date.now();
       const timeSinceLastTap = now - lastTapRef.current;
-      
       if (timeSinceLastTap < 300 && timeSinceLastTap > 0) {
-        // Double-tap detected
         if (isInspectionActiveRef.current && hoveredComponentRef.current && !isLockedRef.current) {
           setIsLocked(true);
-          if (process.env.NODE_ENV === "development") {
-            console.log("[Inspection] Tooltip LOCKED (mobile) - Double-tap again to unlock.");
-          }
         } else if (isLockedRef.current) {
-          // Unlock on double-tap when locked
           setIsLocked(false);
-          if (process.env.NODE_ENV === "development") {
-            console.log("[Inspection] Tooltip UNLOCKED (mobile) - inspection continues.");
-          }
         }
-        lastTapRef.current = 0; // Reset
+        lastTapRef.current = 0;
       } else {
         lastTapRef.current = now;
       }
-
-      // Deactivate if 3-finger touch ends and inspection was active
-      if (e.touches.length === 0 && isInspectionActiveRef.current) {
-        const touchDuration = Date.now() - touchStartTimeRef.current;
-        // Only deactivate if it was a quick tap (not a long-press that activated)
-        if (touchDuration < 800) {
-          setIsInspectionActive(false);
-          setIsLocked(false);
-          hKeyPressedRef.current = false;
-          setInspectionActive(false);
-          setHoveredComponentState(null);
-          setHoveredElement(null);
-          if (process.env.NODE_ENV === "development") {
-            console.log("[Inspection] Deactivated (mobile)");
-          }
-        }
-      }
     };
 
-    const handleTouchCancel = () => {
-      if (!isMobileRef.current) return;
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current);
-        longPressTimerRef.current = null;
-      }
-    };
-
-    // Track CTRL key state and CTRL+H for locking (desktop)
+    // Keyboard: CTRL, CTRL+Shift+R (toggle inspection), CTRL+M (margin/padding), CTRL+H (lock)
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // R key with CTRL+Shift - toggle inspection on/off (sticky, for mobile viewport on laptop)
+      if (e.key && e.key.toLowerCase() === "r" && e.ctrlKey && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) {
+          setIsStickyInspection(prev => {
+            const next = !prev;
+            if (!next) {
+              setHoveredComponentState(null);
+              setHoveredElement(null);
+              setIsLocked(false);
+            }
+            if (process.env.NODE_ENV === "development") {
+              console.log("[Inspection] Inspection toggled (Ctrl+Shift+R):", next ? "ON" : "OFF");
+            }
+            return next;
+          });
+        }
+        return;
+      }
+
+      // M key with CTRL (hold) - margin/padding mode while held, inspect on mouse move
+      if (e.key && e.key.toLowerCase() === "m" && e.ctrlKey && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) {
+          setIsMarginPaddingMode(true);
+          setCtrlHeld(true);
+        }
+        return;
+      }
+
       // H key pressed while CTRL is held - lock tooltip position
-      if (e.key.toLowerCase() === "h" && e.ctrlKey) {
+      if (e.key && e.key.toLowerCase() === "h" && e.ctrlKey) {
         e.preventDefault();
         e.stopPropagation();
         
@@ -182,17 +167,13 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
 
       // CTRL key pressed
       if (e.key === "Control" && !e.repeat) {
-        setIsInspectionActive(true);
-        setInspectionActive(true);
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Inspection] Activated - Hold CTRL and hover over components. Press H to lock tooltip position.");
-        }
+        setCtrlHeld(true);
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       // H key released - unlock tooltip but keep inspection active if CTRL is still held
-      if (e.key.toLowerCase() === "h") {
+      if (e.key && e.key.toLowerCase() === "h") {
         e.preventDefault();
         e.stopPropagation();
         
@@ -212,16 +193,20 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
         return;
       }
 
-      // CTRL key released - unlock and clear
+      // M key released - turn off margin/padding mode (hold-to-use, no toggle)
+      if (e.key && e.key.toLowerCase() === "m") {
+        setIsMarginPaddingMode(false);
+      }
+
+      // CTRL key released - clear only if not in sticky mode
       if (e.key === "Control") {
-        setIsInspectionActive(false);
-        setIsLocked(false);
+        setCtrlHeld(false);
         hKeyPressedRef.current = false;
-        setInspectionActive(false);
-        setHoveredComponentState(null);
-        setHoveredElement(null);
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Inspection] Deactivated");
+        if (!isStickyInspectionRef.current) {
+          setIsMarginPaddingMode(false);
+          setIsLocked(false);
+          setHoveredComponentState(null);
+          setHoveredElement(null);
         }
       }
     };
@@ -229,25 +214,18 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
     
-    // Mobile touch events
-    window.addEventListener("touchstart", handleTouchStart, { passive: true });
-    window.addEventListener("touchend", handleTouchEnd, { passive: true });
-    window.addEventListener("touchcancel", handleTouchCancel, { passive: true });
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+      window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    }
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
-      window.removeEventListener("touchstart", handleTouchStart);
       window.removeEventListener("touchend", handleTouchEnd);
-      window.removeEventListener("touchcancel", handleTouchCancel);
-      
-      // Cleanup timers
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current);
-      }
     };
   }, []); // Empty deps - refs handle state access
 
+  const setHoveredComponentRef = useRef<(c: ComponentMetadata | null, e: HTMLElement | null) => void>(() => {});
   const setHoveredComponent = useCallback((component: ComponentMetadata | null, element: HTMLElement | null) => {
     if (process.env.NODE_ENV !== "development") {
       return; // Only in development
@@ -263,6 +241,7 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
     setHoveredComponentState(component);
     setHoveredElement(element);
   }, []);
+  setHoveredComponentRef.current = setHoveredComponent;
 
   // Setup automatic inspection detection via data attributes
   useEffect(() => {
@@ -285,6 +264,8 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
       value={{
         isInspectionActive,
         isLocked,
+        isMobile,
+        isMarginPaddingMode,
         hoveredComponent,
         hoveredElement,
         setHoveredComponent,
@@ -305,6 +286,8 @@ export const useInspection = (): InspectionState => {
     return {
       isInspectionActive: false,
       isLocked: false,
+      isMobile: false,
+      isMarginPaddingMode: false,
       hoveredComponent: null,
       hoveredElement: null,
       setHoveredComponent: () => {},

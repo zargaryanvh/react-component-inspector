@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { Box, Paper, Typography, IconButton, Tooltip as MuiTooltip, Divider } from "@mui/material";
+import { Box, Paper, Typography, IconButton, Tooltip as MuiTooltip, Divider, Menu, MenuItem } from "@mui/material";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { useInspection, ComponentMetadata } from "./InspectionContext";
 import { formatMetadataForClipboard } from "./inspection";
+import type { CopyType } from "./inspection";
 
 /**
  * Helper: Get element text content (first 100 chars)
@@ -182,10 +183,11 @@ const ComponentMetadataSection: React.FC<{ metadata: ComponentMetadata }> = ({ m
  * Only visible when CTRL is held and a component is hovered
  */
 export const InspectionTooltip: React.FC = () => {
-  const { isInspectionActive, isLocked, hoveredComponent, hoveredElement } = useInspection();
+  const { isInspectionActive, isLocked, isMobile, isMarginPaddingMode, hoveredComponent, hoveredElement } = useInspection();
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [stablePosition, setStablePosition] = useState<{ x: number; y: number } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<CopyType | null>(null);
+  const [copyMenuAnchor, setCopyMenuAnchor] = useState<HTMLElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
 
   // Update position based on cursor, but keep it stable when locked or mouse is near tooltip
@@ -310,16 +312,61 @@ export const InspectionTooltip: React.FC = () => {
     }
   }, [displayComponent?.componentId, adjustedPosition, stablePosition, displayComponent, isLocked]);
 
-  const handleCopy = async () => {
-    if (!displayComponent || !hoveredElement) return;
-
-    const text = formatMetadataForClipboard(displayComponent as any, hoveredElement);
+  const fallbackCopy = (text: string): boolean => {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    // Must be in viewport and focusable for iOS/mobile to allow copy
+    textarea.style.position = "fixed";
+    textarea.style.left = "0";
+    textarea.style.top = "0";
+    textarea.style.width = "2em";
+    textarea.style.height = "2em";
+    textarea.style.padding = "0";
+    textarea.style.border = "none";
+    textarea.style.outline = "none";
+    textarea.style.boxShadow = "none";
+    textarea.style.background = "transparent";
+    textarea.style.opacity = "0";
+    textarea.style.zIndex = "-1";
+    textarea.setAttribute("readonly", "");
+    textarea.setAttribute("aria-hidden", "true");
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, text.length);
+    let ok = false;
     try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy:", err);
+      ok = document.execCommand("copy");
+    } catch (e) {
+      // ignore
+    }
+    document.body.removeChild(textarea);
+    return ok;
+  };
+
+  const handleCopy = (type: CopyType) => {
+    if (!displayComponent || !hoveredElement) return;
+    setCopyMenuAnchor(null);
+
+    const text = formatMetadataForClipboard(displayComponent as ComponentMetadata, hoveredElement, type);
+    const showCopied = () => {
+      setCopied(type);
+      setTimeout(() => setCopied(null), 2000);
+    };
+
+    // On mobile, execCommand('copy') is more reliable when run directly from the tap
+    const useFallbackFirst = isMobile || ("ontouchstart" in window);
+    if (useFallbackFirst) {
+      if (fallbackCopy(text)) showCopied();
+      else if (typeof navigator.clipboard?.writeText === "function") {
+        navigator.clipboard.writeText(text).then(showCopied, () => {});
+      }
+    } else if (typeof navigator.clipboard?.writeText === "function") {
+      navigator.clipboard.writeText(text).then(showCopied, () => {
+        if (fallbackCopy(text)) showCopied();
+      });
+    } else {
+      if (fallbackCopy(text)) showCopied();
     }
   };
 
@@ -330,9 +377,20 @@ export const InspectionTooltip: React.FC = () => {
     }
   }, [hoveredElement, isLocked]);
 
-  // Show tooltip for any hovered element when CTRL is held
+  // Close copy menu when tooltip is hidden so MUI Menu never has a detached anchorEl
+  const tooltipVisible = isInspectionActive && !!displayComponent && !(isMobile && !isLocked);
+  useEffect(() => {
+    if (!tooltipVisible) {
+      setCopyMenuAnchor(null);
+    }
+  }, [tooltipVisible]);
+
+  // Show tooltip when inspection active; on mobile only when locked (H pressed or double-tap)
   if (!isInspectionActive || !displayComponent) {
     return null;
+  }
+  if (isMobile && !isLocked) {
+    return null; // On mobile: tooltip only when user locks (H key or double-tap)
   }
 
   return (
@@ -359,25 +417,112 @@ export const InspectionTooltip: React.FC = () => {
           <Typography variant="subtitle2" sx={{ color: "#fff", fontWeight: 600, fontSize: "0.875rem" }}>
             Component Inspector
           </Typography>
+          {isMarginPaddingMode && (
+            <Typography variant="caption" sx={{ color: "#ff9800", fontSize: "0.65rem" }}>
+              M/P mode
+            </Typography>
+          )}
           {isLocked && (
             <Typography variant="caption" sx={{ color: "#4caf50", fontSize: "0.7rem", fontStyle: "italic" }}>
               (Locked - Release H to unlock)
             </Typography>
           )}
         </Box>
-        <MuiTooltip title={copied ? "Copied!" : "Copy metadata"}>
-          <IconButton
-            size="small"
-            onClick={handleCopy}
-            sx={{
-              color: copied ? "#4caf50" : "#fff",
-              "&:hover": { backgroundColor: "rgba(255, 255, 255, 0.1)" },
-              p: 0.5,
-            }}
-          >
-            <ContentCopyIcon fontSize="small" />
-          </IconButton>
-        </MuiTooltip>
+        {/* On mobile: direct copy buttons; Margin and Padding grouped together */}
+        {isMobile ? (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+            <IconButton
+              size="small"
+              onPointerDown={(e) => { e.preventDefault(); handleCopy("component"); }}
+              sx={{ color: copied === "component" ? "#4caf50" : "#fff", p: 0.5, minWidth: 36, minHeight: 36 }}
+              aria-label="Copy component"
+            >
+              <ContentCopyIcon fontSize="small" />
+            </IconButton>
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "stretch",
+                border: "1px solid rgba(255,255,255,0.25)",
+                borderRadius: 1,
+                overflow: "hidden",
+              }}
+            >
+              <Typography
+                component="button"
+                type="button"
+                variant="caption"
+                onPointerDown={(e) => { e.preventDefault(); handleCopy("margin"); }}
+                sx={{
+                  color: copied === "margin" ? "#4caf50" : "rgba(255,255,255,0.9)",
+                  fontSize: "0.65rem",
+                  cursor: "pointer",
+                  background: "none",
+                  border: "none",
+                  borderRight: "1px solid rgba(255,255,255,0.25)",
+                  padding: "4px 6px",
+                  fontFamily: "inherit",
+                  minWidth: 44,
+                }}
+              >
+                Margin
+              </Typography>
+              <Typography
+                component="button"
+                type="button"
+                variant="caption"
+                onPointerDown={(e) => { e.preventDefault(); handleCopy("padding"); }}
+                sx={{
+                  color: copied === "padding" ? "#4caf50" : "rgba(255,255,255,0.9)",
+                  fontSize: "0.65rem",
+                  cursor: "pointer",
+                  background: "none",
+                  border: "none",
+                  padding: "4px 6px",
+                  fontFamily: "inherit",
+                  minWidth: 44,
+                }}
+              >
+                Padding
+              </Typography>
+            </Box>
+          </Box>
+        ) : (
+          <>
+            <MuiTooltip title={copied ? `Copied ${copied}!` : "Copy: Component / Margin / Padding"}>
+              <IconButton
+                size="small"
+                onClick={(e) => setCopyMenuAnchor(e.currentTarget)}
+                sx={{
+                  color: copied ? "#4caf50" : "#fff",
+                  "&:hover": { backgroundColor: "rgba(255, 255, 255, 0.1)" },
+                  p: 0.5,
+                }}
+              >
+                <ContentCopyIcon fontSize="small" />
+              </IconButton>
+            </MuiTooltip>
+            <Menu
+              anchorEl={copyMenuAnchor && document.body.contains(copyMenuAnchor) ? copyMenuAnchor : null}
+              open={!!copyMenuAnchor && document.body.contains(copyMenuAnchor)}
+              onClose={() => setCopyMenuAnchor(null)}
+              anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+              transformOrigin={{ vertical: "top", horizontal: "right" }}
+              PaperProps={{ sx: { backgroundColor: "rgba(18, 18, 18, 0.95)", minWidth: 140 } }}
+              MenuListProps={{ dense: true }}
+            >
+              <MenuItem onClick={() => handleCopy("component")} sx={{ color: "#fff", fontSize: "0.8rem" }}>
+                Copy Component
+              </MenuItem>
+              <MenuItem onClick={() => handleCopy("margin")} sx={{ color: "#fff", fontSize: "0.8rem" }}>
+                Copy Margin
+              </MenuItem>
+              <MenuItem onClick={() => handleCopy("padding")} sx={{ color: "#fff", fontSize: "0.8rem" }}>
+                Copy Padding
+              </MenuItem>
+            </Menu>
+          </>
+        )}
       </Box>
 
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
