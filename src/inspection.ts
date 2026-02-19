@@ -112,7 +112,7 @@ export const getAncestorsWithMargin = (
 /**
  * Build DOM path from body to element (helps Cursor identify exact element)
  */
-const buildDomPath = (element: HTMLElement): string => {
+export const buildDomPath = (element: HTMLElement): string => {
   const segments: string[] = [];
   let current: HTMLElement | null = element;
   while (current && current !== document.body) {
@@ -132,7 +132,7 @@ const buildDomPath = (element: HTMLElement): string => {
 /**
  * Build parent element description
  */
-const buildParentInfo = (element: HTMLElement): string | null => {
+export const buildParentInfo = (element: HTMLElement): string | null => {
   const parent = element.parentElement;
   if (!parent || parent === document.body) return null;
   const tag = parent.tagName.toLowerCase();
@@ -148,7 +148,7 @@ const buildParentInfo = (element: HTMLElement): string | null => {
 /**
  * Build role/disambiguation (outer vs inner, position in tree)
  */
-const buildRoleInTree = (element: HTMLElement, type: "margin" | "padding" | "component"): string => {
+export const buildRoleInTree = (element: HTMLElement, type: "margin" | "padding" | "component"): string => {
   const parent = element.parentElement;
   const children = element.children;
   const childCount = Array.from(children).length;
@@ -403,6 +403,86 @@ export const formatPaddingForClipboard = (metadata: ComponentMetadata, element: 
  */
 export const formatGapForClipboard = (metadata: ComponentMetadata, element: HTMLElement): string => {
   return formatMetadataForClipboard(metadata, element, "gap");
+};
+
+/**
+ * Get "how to find" display info for tooltip (same logic for desktop and mobile)
+ */
+export const getTooltipHowToFindInfo = (
+  metadata: ComponentMetadata,
+  element: HTMLElement,
+  type: CopyType
+): { domPath: string; parent: string | null; roleInTree: string; target: string; howToFindSteps: string[] } => {
+  const domPath = buildDomPath(element);
+  const parent = buildParentInfo(element);
+
+  if (type === "component") {
+    const rect = element.getBoundingClientRect();
+    const classNameStr = element.className ? (typeof element.className === "string" ? element.className : String(element.className)) : "";
+    const firstClass = classNameStr.split(/\s+/).find((c) => c && (c.startsWith("Mui") || c.startsWith("css-")));
+    const desc = firstClass ? `${metadata.componentName} with class ${firstClass}` : metadata.componentName;
+    const target = `The ${desc} - position (${Math.round(rect.left)}, ${Math.round(rect.top)}), size ${Math.round(rect.width)}x${Math.round(rect.height)}px. It is the element in the DOM path above, NOT a child.`;
+    const steps: string[] = [
+      "Use the DOM Path to locate the correct element - do NOT change a child if the path shows this element is the parent.",
+      metadata.sourceFile !== "DOM"
+        ? `Open ${metadata.sourceFile} and find the component that renders this element.`
+        : "Search for the parent component that renders this layout. Look for the component in Usage Path or by Element Text/Label.",
+      "Modify the component's props, sx, or styles as needed.",
+    ];
+    return { domPath, parent, roleInTree: buildRoleInTree(element, "component"), target, howToFindSteps: steps };
+  }
+
+  if (type === "margin" || type === "padding") {
+    const cs = window.getComputedStyle(element);
+    const classNameStr = element.className ? (typeof element.className === "string" ? element.className : String(element.className)) : "";
+    const firstClass = classNameStr.split(/\s+/).find((c) => c && (c.startsWith("Mui") || c.startsWith("css-")));
+    const desc = firstClass ? `${metadata.componentName} with class ${firstClass}` : metadata.componentName;
+    if (type === "margin") {
+      const mt = getCssValue(cs.marginTop);
+      const mr = getCssValue(cs.marginRight);
+      const mb = getCssValue(cs.marginBottom);
+      const ml = getCssValue(cs.marginLeft);
+      const target = `The ${desc} - the element with margin ${mt} ${mr} ${mb} ${ml}. It is the PARENT in the DOM path above, NOT a child.`;
+      const steps: string[] = [
+        "Use the DOM Path to locate the correct element - do NOT change a child (e.g. CardContent, MuiBox) if the path shows this element is the parent.",
+        metadata.sourceFile !== "DOM"
+          ? `Open ${metadata.sourceFile} and find the component that renders this element.`
+          : "Search for the parent component that renders this layout. Look for MUI components (Box, Card, etc.) - the element with these margin values may use sx={{ m: ... }} or style props.",
+        "Change margin: sx={{ margin: 0 }} or margin: \"4px\" or mt: 1, mr: 1, mb: 1, ml: 1 (MUI theme spacing).",
+      ];
+      return { domPath, parent, roleInTree: buildRoleInTree(element, "margin"), target, howToFindSteps: steps };
+    } else {
+      const pt = getCssValue(cs.paddingTop);
+      const pr = getCssValue(cs.paddingRight);
+      const pb = getCssValue(cs.paddingBottom);
+      const pl = getCssValue(cs.paddingLeft);
+      const target = `The ${desc} - the element with padding ${pt} ${pr} ${pb} ${pl}. It is the PARENT in the DOM path above, NOT a child.`;
+      const steps: string[] = [
+        "Use the DOM Path to locate the correct element - do NOT change a child (e.g. CardContent, MuiBox) if the path shows this element is the parent.",
+        metadata.sourceFile !== "DOM"
+          ? `Open ${metadata.sourceFile} and find the component that renders this element.`
+          : "Search for the parent component that renders this layout. Look for MUI components (Box, Card, CardContent, etc.) - the element with these exact padding values may use sx={{ p: ... }} or padding props.",
+        "Change padding: sx={{ padding: 0 }} or p: \"4px\" or pt: 1, pr: 1, pb: 1, pl: 1 (MUI theme spacing).",
+      ];
+      return { domPath, parent, roleInTree: buildRoleInTree(element, "padding"), target, howToFindSteps: steps };
+    }
+  }
+
+  // type === "gap" - element is the parent with gap
+  const cs = window.getComputedStyle(element);
+  const gap = getCssValue(cs.gap);
+  const classNameStr = element.className ? (typeof element.className === "string" ? element.className : String(element.className)) : "";
+  const firstClass = classNameStr.split(/\s+/).find((c) => c && (c.startsWith("Mui") || c.startsWith("css-")));
+  const desc = firstClass ? `${metadata.componentName} with class ${firstClass}` : metadata.componentName;
+  const target = `The ${desc} - the flex/grid container with gap ${gap}. It is the PARENT in the DOM path above.`;
+  const steps: string[] = [
+    "Use the DOM Path to locate the flex/grid container.",
+    metadata.sourceFile !== "DOM"
+      ? `Open ${metadata.sourceFile} and find the component that renders this element.`
+      : "Search for the component that renders this layout (Box, Stack, Grid, etc.).",
+    "Change gap: sx={{ gap: 1 }} or gap: \"8px\" or rowGap/columnGap (MUI theme spacing).",
+  ];
+  return { domPath, parent, roleInTree: "flex/grid container", target, howToFindSteps: steps };
 };
 
 /**

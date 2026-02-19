@@ -15,6 +15,7 @@ export {
   formatGapForClipboard,
   getParentWithGap,
   getAncestorsWithMargin,
+  getTooltipHowToFindInfo,
   getComponentName,
   getNextInstanceIndex
 } from './inspection';

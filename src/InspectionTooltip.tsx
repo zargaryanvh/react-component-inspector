@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { Box, Paper, Typography, IconButton, Tooltip as MuiTooltip, Divider, Menu, MenuItem } from "@mui/material";
+import { Box, Paper, Typography, IconButton, Tooltip as MuiTooltip, Divider } from "@mui/material";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { useInspection, ComponentMetadata } from "./InspectionContext";
-import { formatMetadataForClipboard, getParentWithGap } from "./inspection";
+import { formatMetadataForClipboard, getParentWithGap, getTooltipHowToFindInfo } from "./inspection";
 import { parseInspectionMetadata } from "./autoInspection";
 import type { CopyType } from "./inspection";
 
@@ -188,7 +188,6 @@ export const InspectionTooltip: React.FC = () => {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [stablePosition, setStablePosition] = useState<{ x: number; y: number } | null>(null);
   const [copied, setCopied] = useState<CopyType | null>(null);
-  const [copyMenuAnchor, setCopyMenuAnchor] = useState<HTMLElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
 
   // Update position based on cursor, but keep it stable when locked or mouse is near tooltip
@@ -249,8 +248,25 @@ export const InspectionTooltip: React.FC = () => {
     sourceFile: "DOM",
   } : null);
 
+  // On mobile (or when locking) there is no cursor; position tooltip over/near the inspected element
+  const positionFromElement = useMemo(() => {
+    if (!hoveredElement || !document.body.contains(hoveredElement)) return null;
+    const padding = 10;
+    const estimatedWidth = 400;
+    const estimatedHeight = 200;
+    const rect = hoveredElement.getBoundingClientRect();
+    // Prefer below and to the right of the element, clamped to viewport
+    let x = rect.left + 15;
+    let y = rect.bottom + 10;
+    if (x + estimatedWidth > window.innerWidth - padding) x = window.innerWidth - estimatedWidth - padding;
+    if (x < padding) x = padding;
+    if (y + estimatedHeight > window.innerHeight - padding) y = rect.top - estimatedHeight - 10;
+    if (y < padding) y = padding;
+    return { x, y };
+  }, [hoveredElement]);
+
   // Calculate adjusted position to avoid going off-screen
-  // Use stable position if available, otherwise calculate from cursor position
+  // Use stable position if available; on mobile or when locked use element-based position so tooltip appears over inspected area
   const adjustedPosition = useMemo(() => {
     if (!displayComponent) {
       return { x: position.x + 15, y: position.y + 15 };
@@ -261,7 +277,12 @@ export const InspectionTooltip: React.FC = () => {
       return stablePosition;
     }
 
-    // Calculate new position from cursor (only when stablePosition is null)
+    // Mobile or just locked: place tooltip near the inspected element (not cursor)
+    if ((isMobile || isLocked) && positionFromElement) {
+      return positionFromElement;
+    }
+
+    // Desktop: calculate from cursor position
     const padding = 10;
     let x = position.x + 15;
     let y = position.y + 15;
@@ -289,7 +310,7 @@ export const InspectionTooltip: React.FC = () => {
     }
 
     return { x, y };
-  }, [position, displayComponent, stablePosition]);
+  }, [position, displayComponent, stablePosition, isMobile, isLocked, positionFromElement]);
   
   // Set stable position once when tooltip first appears for a new element, or when locked
   const lastComponentIdRef = useRef<string | null>(null);
@@ -352,7 +373,6 @@ export const InspectionTooltip: React.FC = () => {
       if (!parentWithGap) return;
       const metadata = parseInspectionMetadata(parentWithGap);
       if (!metadata) return;
-      setCopyMenuAnchor(null);
       const text = formatMetadataForClipboard(metadata, parentWithGap, "gap");
       const showCopied = () => {
         setCopied("gap");
@@ -374,8 +394,6 @@ export const InspectionTooltip: React.FC = () => {
       return;
     }
     if (!displayComponent) return;
-    setCopyMenuAnchor(null);
-
     const text = formatMetadataForClipboard(displayComponent as ComponentMetadata, hoveredElement, type);
     const showCopied = () => {
       setCopied(type);
@@ -404,14 +422,6 @@ export const InspectionTooltip: React.FC = () => {
       setStablePosition(null);
     }
   }, [hoveredElement, isLocked]);
-
-  // Close copy menu when tooltip is hidden so MUI Menu never has a detached anchorEl
-  const tooltipVisible = isInspectionActive && !!displayComponent && !(isMobile && !isLocked);
-  useEffect(() => {
-    if (!tooltipVisible) {
-      setCopyMenuAnchor(null);
-    }
-  }, [tooltipVisible]);
 
   const parentWithGap = hoveredElement ? getParentWithGap(hoveredElement) : null;
 
@@ -458,127 +468,100 @@ export const InspectionTooltip: React.FC = () => {
             </Typography>
           )}
         </Box>
-        {/* On mobile: direct copy buttons; Margin and Padding grouped together */}
-        {isMobile ? (
-          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+        {/* Copy: Component icon + Margin / Padding / Gap buttons (desktop and mobile) */}
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+          <MuiTooltip title={copied === "component" ? "Copied!" : "Copy component"}>
             <IconButton
               size="small"
+              onClick={(e) => { e.preventDefault(); handleCopy("component"); }}
               onPointerDown={(e) => { e.preventDefault(); handleCopy("component"); }}
-              sx={{ color: copied === "component" ? "#4caf50" : "#fff", p: 0.5, minWidth: 36, minHeight: 36 }}
+              sx={{
+                color: copied === "component" ? "#4caf50" : "#fff",
+                "&:hover": { backgroundColor: "rgba(255, 255, 255, 0.1)" },
+                p: 0.5,
+                minWidth: 36,
+                minHeight: 36,
+              }}
               aria-label="Copy component"
             >
               <ContentCopyIcon fontSize="small" />
             </IconButton>
-            <Box
+          </MuiTooltip>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "stretch",
+              border: "1px solid rgba(255,255,255,0.25)",
+              borderRadius: 1,
+              overflow: "hidden",
+            }}
+          >
+            <Typography
+              component="button"
+              type="button"
+              variant="caption"
+              onClick={(e) => { e.preventDefault(); handleCopy("margin"); }}
+              onPointerDown={(e) => { e.preventDefault(); handleCopy("margin"); }}
               sx={{
-                display: "flex",
-                alignItems: "stretch",
-                border: "1px solid rgba(255,255,255,0.25)",
-                borderRadius: 1,
-                overflow: "hidden",
+                color: copied === "margin" ? "#4caf50" : "rgba(255,255,255,0.9)",
+                fontSize: isMobile ? "0.65rem" : "0.7rem",
+                cursor: "pointer",
+                background: "none",
+                border: "none",
+                borderRight: "1px solid rgba(255,255,255,0.25)",
+                padding: "4px 6px",
+                fontFamily: "inherit",
+                minWidth: 44,
+                "&:hover": { backgroundColor: "rgba(255,255,255,0.08)" },
               }}
             >
-              <Typography
-                component="button"
-                type="button"
-                variant="caption"
-                onPointerDown={(e) => { e.preventDefault(); handleCopy("margin"); }}
-                sx={{
-                  color: copied === "margin" ? "#4caf50" : "rgba(255,255,255,0.9)",
-                  fontSize: "0.65rem",
-                  cursor: "pointer",
-                  background: "none",
-                  border: "none",
-                  borderRight: "1px solid rgba(255,255,255,0.25)",
-                  padding: "4px 6px",
-                  fontFamily: "inherit",
-                  minWidth: 44,
-                }}
-              >
-                Margin
-              </Typography>
-              <Typography
-                component="button"
-                type="button"
-                variant="caption"
-                onPointerDown={(e) => { e.preventDefault(); handleCopy("padding"); }}
-                sx={{
-                  color: copied === "padding" ? "#4caf50" : "rgba(255,255,255,0.9)",
-                  fontSize: "0.65rem",
-                  cursor: "pointer",
-                  background: "none",
-                  border: "none",
-                  borderRight: parentWithGap ? "1px solid rgba(255,255,255,0.25)" : "none",
-                  padding: "4px 6px",
-                  fontFamily: "inherit",
-                  minWidth: 44,
-                }}
-              >
-                Padding
-              </Typography>
-              {parentWithGap && (
-                <Typography
-                  component="button"
-                  type="button"
-                  variant="caption"
-                  onPointerDown={(e) => { e.preventDefault(); handleCopy("gap"); }}
-                  sx={{
-                    color: copied === "gap" ? "#4caf50" : "rgba(156, 39, 176, 0.95)",
-                    fontSize: "0.65rem",
-                    cursor: "pointer",
-                    background: "none",
-                    border: "none",
-                    padding: "4px 6px",
-                    fontFamily: "inherit",
-                    minWidth: 44,
-                  }}
-                >
-                  Gap
-                </Typography>
-              )}
-            </Box>
-          </Box>
-        ) : (
-          <>
-            <MuiTooltip title={copied ? `Copied ${copied}!` : "Copy: Component / Margin / Padding"}>
-              <IconButton
-                size="small"
-                onClick={(e) => setCopyMenuAnchor(e.currentTarget)}
-                sx={{
-                  color: copied ? "#4caf50" : "#fff",
-                  "&:hover": { backgroundColor: "rgba(255, 255, 255, 0.1)" },
-                  p: 0.5,
-                }}
-              >
-                <ContentCopyIcon fontSize="small" />
-              </IconButton>
-            </MuiTooltip>
-            <Menu
-              anchorEl={copyMenuAnchor && document.body.contains(copyMenuAnchor) ? copyMenuAnchor : null}
-              open={!!copyMenuAnchor && document.body.contains(copyMenuAnchor)}
-              onClose={() => setCopyMenuAnchor(null)}
-              anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-              transformOrigin={{ vertical: "top", horizontal: "right" }}
-              PaperProps={{ sx: { backgroundColor: "rgba(18, 18, 18, 0.95)", minWidth: 140 } }}
-              MenuListProps={{ dense: true }}
+              Margin
+            </Typography>
+            <Typography
+              component="button"
+              type="button"
+              variant="caption"
+              onClick={(e) => { e.preventDefault(); handleCopy("padding"); }}
+              onPointerDown={(e) => { e.preventDefault(); handleCopy("padding"); }}
+              sx={{
+                color: copied === "padding" ? "#4caf50" : "rgba(255,255,255,0.9)",
+                fontSize: isMobile ? "0.65rem" : "0.7rem",
+                cursor: "pointer",
+                background: "none",
+                border: "none",
+                borderRight: parentWithGap ? "1px solid rgba(255,255,255,0.25)" : "none",
+                padding: "4px 6px",
+                fontFamily: "inherit",
+                minWidth: 44,
+                "&:hover": { backgroundColor: "rgba(255,255,255,0.08)" },
+              }}
             >
-              <MenuItem onClick={() => handleCopy("component")} sx={{ color: "#fff", fontSize: "0.8rem" }}>
-                Copy Component
-              </MenuItem>
-              <MenuItem onClick={() => handleCopy("margin")} sx={{ color: "#fff", fontSize: "0.8rem" }}>
-                Copy Margin
-              </MenuItem>
-              <MenuItem onClick={() => handleCopy("padding")} sx={{ color: "#fff", fontSize: "0.8rem" }}>
-                Copy Padding
-              </MenuItem>
-              {parentWithGap && (
-                <MenuItem onClick={() => handleCopy("gap")} sx={{ color: "#9c27b0", fontSize: "0.8rem" }}>
-                  Copy Gap (parent)
-                </MenuItem>
-              )}
-            </Menu>
-          </>
-        )}
+              Padding
+            </Typography>
+            {parentWithGap && (
+              <Typography
+                component="button"
+                type="button"
+                variant="caption"
+                onClick={(e) => { e.preventDefault(); handleCopy("gap"); }}
+                onPointerDown={(e) => { e.preventDefault(); handleCopy("gap"); }}
+                sx={{
+                  color: copied === "gap" ? "#4caf50" : "rgba(156, 39, 176, 0.95)",
+                  fontSize: isMobile ? "0.65rem" : "0.7rem",
+                  cursor: "pointer",
+                  background: "none",
+                  border: "none",
+                  padding: "4px 6px",
+                  fontFamily: "inherit",
+                  minWidth: 44,
+                  "&:hover": { backgroundColor: "rgba(255,255,255,0.08)" },
+                }}
+              >
+                Gap
+              </Typography>
+            )}
+          </Box>
+        </Box>
       </Box>
 
       {/* When in margin/padding mode: show legend so user knows which highlight is which */}
@@ -660,6 +643,43 @@ export const InspectionTooltip: React.FC = () => {
         />
 
         <Divider sx={{ borderColor: "rgba(255, 255, 255, 0.1)", my: 0.5 }} />
+
+        {/* How to find - same for desktop and mobile */}
+        {hoveredElement && (() => {
+          const howToType: CopyType = isMarginPaddingMode ? "margin" : "component";
+          const info = getTooltipHowToFindInfo(displayComponent as ComponentMetadata, hoveredElement, howToType);
+          return (
+            <>
+              <Typography variant="caption" sx={{ color: "rgba(255, 255, 255, 0.9)", fontSize: "0.7rem", fontWeight: 600 }}>
+                === HOW TO FIND IN CODE ===
+              </Typography>
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, pl: 0.5 }}>
+                <Typography variant="caption" sx={{ color: "rgba(255, 255, 255, 0.7)", fontSize: "0.65rem", wordBreak: "break-all" }}>
+                  <strong>DOM Path:</strong> {info.domPath}
+                </Typography>
+                {info.parent && (
+                  <Typography variant="caption" sx={{ color: "rgba(255, 255, 255, 0.7)", fontSize: "0.65rem" }}>
+                    <strong>Parent:</strong> {info.parent}
+                  </Typography>
+                )}
+                <Typography variant="caption" sx={{ color: "rgba(255, 255, 255, 0.7)", fontSize: "0.65rem" }}>
+                  <strong>Role in tree:</strong> {info.roleInTree}
+                </Typography>
+                <Typography variant="caption" sx={{ color: "rgba(255, 255, 255, 0.85)", fontSize: "0.65rem", mt: 0.5 }}>
+                  <strong>TARGET:</strong> {info.target}
+                </Typography>
+                <Box component="ol" sx={{ m: 0, pl: 1.5, fontSize: "0.65rem", color: "rgba(255, 255, 255, 0.7)" }}>
+                  {info.howToFindSteps.map((step, i) => (
+                    <Typography key={i} component="li" variant="caption" sx={{ color: "rgba(255, 255, 255, 0.7)", fontSize: "0.65rem", mb: 0.25 }}>
+                      {step}
+                    </Typography>
+                  ))}
+                </Box>
+              </Box>
+              <Divider sx={{ borderColor: "rgba(255, 255, 255, 0.1)", my: 0.5 }} />
+            </>
+          );
+        })()}
 
         {/* Component Metadata Section */}
         <ComponentMetadataSection metadata={displayComponent} />

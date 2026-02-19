@@ -17,7 +17,7 @@ const parsePx = (value: string): number => {
 
 /**
  * Highlight overlay that shows the boundary of the hovered component
- * When hold CTRL+M: orange = margin, green = padding, purple = gap (hold-to-use, release to exit)
+ * When hold CTRL+ALT: orange = margin, green = padding, purple = gap (hold-to-use, release to exit)
  * Otherwise: blue outline for component
  */
 const stripStyle = (left: number, top: number, width: number, height: number, color: string, bg: string): React.CSSProperties => ({

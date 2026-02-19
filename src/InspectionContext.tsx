@@ -36,21 +36,20 @@ const InspectionContext = createContext<InspectionState | undefined>(undefined);
  */
 export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [ctrlHeld, setCtrlHeld] = useState(false);
-  const [isStickyInspection, setIsStickyInspection] = useState(false);
-  const isInspectionActive = ctrlHeld || isStickyInspection;
-  const [isLocked, setIsLocked] = useState(false);
   const [isMarginPaddingMode, setIsMarginPaddingMode] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
+  // Inspection active only when CTRL is held (or CTRL+ALT for margin/padding). Release CTRL = stop inspecting.
+  const isInspectionActive = ctrlHeld || isMarginPaddingMode;
   const [hoveredComponent, setHoveredComponentState] = useState<ComponentMetadata | null>(null);
   const [hoveredElement, setHoveredElement] = useState<HTMLElement | null>(null);
 
   // Use refs to always access latest state values in event handlers
   const isInspectionActiveRef = useRef(isInspectionActive);
   const isLockedRef = useRef(isLocked);
-  const isStickyInspectionRef = useRef(isStickyInspection);
   const hoveredComponentRef = useRef(hoveredComponent);
   const hKeyPressedRef = useRef(false);
   
-  // Touch support for locking only (3/4 finger activation removed - use Ctrl+Shift+R on laptop)
+  // Touch support for locking only (double-tap to lock tooltip)
   const lastTapRef = useRef<number>(0);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -77,11 +76,7 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
     hoveredComponentRef.current = hoveredComponent;
   }, [hoveredComponent]);
 
-  useEffect(() => {
-    isStickyInspectionRef.current = isStickyInspection;
-  }, [isStickyInspection]);
-
-  // Only block API/fetch when CTRL is physically held (not when sticky inspection is on)
+  // Only block API/fetch when CTRL is physically held
   useEffect(() => {
     setInspectionActive(ctrlHeld);
   }, [ctrlHeld]);
@@ -109,39 +104,20 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
       }
     };
 
-    // Keyboard: CTRL, CTRL+Shift+R (toggle inspection), CTRL+M (margin/padding), CTRL+H (lock)
+    // Keyboard: CTRL (hold = inspection), CTRL+Shift+R = hard refresh (do not capture), CTRL+ALT (margin/padding), CTRL+H (lock)
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // R key with CTRL+Shift - toggle inspection on/off (sticky, for mobile viewport on laptop)
+      // Do NOT capture CTRL+Shift+R - let browser do hard refresh
       if (e.key && e.key.toLowerCase() === "r" && e.ctrlKey && e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!e.repeat) {
-          setIsStickyInspection(prev => {
-            const next = !prev;
-            if (!next) {
-              setHoveredComponentState(null);
-              setHoveredElement(null);
-              setIsLocked(false);
-            }
-            if (process.env.NODE_ENV === "development") {
-              console.log("[Inspection] Inspection toggled (Ctrl+Shift+R):", next ? "ON" : "OFF");
-            }
-            return next;
-          });
-        }
         return;
       }
 
-      // M key with CTRL (hold) - margin/padding mode while held, inspect on mouse move
-      if (e.key && e.key.toLowerCase() === "m" && e.ctrlKey && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!e.repeat) {
-          setIsMarginPaddingMode(true);
-          setCtrlHeld(true);
-        }
-        return;
+      // CTRL+ALT (hold both) - margin/padding/box mode; desktop and mobile
+      if (e.key === "Control" && e.altKey && !e.repeat) {
+        setIsMarginPaddingMode(true);
+      }
+      if (e.key === "Alt" && e.ctrlKey && !e.repeat) {
+        setIsMarginPaddingMode(true);
       }
 
       // H key pressed while CTRL is held - lock tooltip position
@@ -193,21 +169,19 @@ export const InspectionProvider: React.FC<{ children: ReactNode }> = ({ children
         return;
       }
 
-      // M key released - turn off margin/padding mode (hold-to-use, no toggle)
-      if (e.key && e.key.toLowerCase() === "m") {
+      // ALT or CTRL released - turn off margin/padding mode (CTRL+ALT only, hold to use)
+      if (e.key === "Alt") {
         setIsMarginPaddingMode(false);
       }
 
-      // CTRL key released - clear only if not in sticky mode
+      // CTRL key released - stop inspecting and clear state
       if (e.key === "Control") {
         setCtrlHeld(false);
         hKeyPressedRef.current = false;
-        if (!isStickyInspectionRef.current) {
-          setIsMarginPaddingMode(false);
-          setIsLocked(false);
-          setHoveredComponentState(null);
-          setHoveredElement(null);
-        }
+        setIsMarginPaddingMode(false);
+        setIsLocked(false);
+        setHoveredComponentState(null);
+        setHoveredElement(null);
       }
     };
 

@@ -23,12 +23,18 @@ When working with AI assistants to fix or modify frontend code, you often need t
 
 ### The Solution
 React Component Inspector provides:
-- **One-click component identification** - Just hold CTRL and hover
+- **One-click component identification** - Hold CTRL and hover over any element
+- **Margin, padding & gap inspection** - Hold CTRL+ALT to see spacing (margin, padding, flex/grid gap) and copy it for Cursor
 - **Rich metadata extraction** - Component name, props, file path, usage context
-- **AI-optimized format** - Copy-paste ready metadata for AI assistants
+- **AI-optimized format** - Copy-paste ready metadata for AI assistants (Component, Margin, Padding, Gap)
+- **How to find in code** - Tooltip shows DOM path, target element, and step-by-step how to find and modify in Cursor
 - **Zero production overhead** - Completely disabled in production builds
 
 ## 📊 What Data Does It Provide?
+
+When you hold **CTRL** and hover over an element, a tooltip appears showing component metadata, copy buttons (Component / Margin / Padding / Gap), and the "How to find in code" section:
+
+![Inspector tooltip showing component data, copy buttons, and how to find in code](docs/screenshots/tooltip-preview.png)
 
 When you inspect a component, you get:
 
@@ -50,26 +56,43 @@ When you inspect a component, you get:
 - Props signature (key props affecting behavior)
 - Source file path
 
-### Example Output
+### Example Output (Copy Component)
 ```
+=== TYPE: COMPONENT ===
+
 === ELEMENT IDENTIFICATION ===
 Element Type: button
 Element Text/Label: "Save Transaction"
-Element ID: save-button
-Element Classes: MuiButton-root, primary-button
-CSS Selector: button#save-button
-Position: (450, 320)
-Size: 120x36px
+...
+DOM Path: body > div#root > div.MuiBox-root > button.MuiButton-root
+Parent: div.MuiBox-root
+Role in tree: leaf element; parent: div.MuiBox-root
+
+=== TARGET (use this to instruct Cursor) ===
+TARGET: The SaveButton with class MuiButton-root - position (450, 320), size 120x36px. It is the element in the DOM path above, NOT a child.
+
+=== HOW TO FIND AND MODIFY THIS COMPONENT IN CODE ===
+1. Use the DOM Path to locate the correct element...
+2. Open src/components/buttons/SaveButton.tsx and find the component...
+3. Modify the component's props, sx, or styles as needed.
 
 === COMPONENT METADATA ===
-Component Name: SaveButton
-Component ID: save-button-0
-Variant: primary
-Usage Path: ActivityPage > EditTransactionModal > TransactionForm
-Instance: 0
-Props: variant=primary, disabled=false
-Source File: src/components/buttons/SaveButton.tsx
+...
 ```
+
+When you copy **Margin**, **Padding**, or **Gap**, you get the same structure with current values and instructions for changing that spacing in code (e.g. `sx={{ m: 1 }}`, `sx={{ p: 0.5 }}`, `sx={{ gap: 1 }}`).
+
+## 🔎 How to Find and Modify in Cursor
+
+The tooltip shows a **“How to find in code”** section (same on desktop and mobile):
+
+- **DOM Path** – Full path from `body` to the element (e.g. `body > div#root > div.MuiBox-root > main.MuiBox-root > …`)
+- **Parent** – Direct parent selector
+- **Role in tree** – e.g. “has 3 child element(s); parent: div.MuiStack-root”
+- **TARGET** – One-line description for Cursor: “The Card with class MuiPaper-root – the element with margin 0px 0px 16px 0px. It is the PARENT in the DOM path above, NOT a child.”
+- **Steps** – Numbered steps: use DOM path, open source file, then how to change (margin, padding, gap, or component)
+
+When you click **Copy Component**, **Copy Margin**, **Copy Padding**, or **Copy Gap**, the clipboard gets the full block (element identification, DOM path, TARGET, and “How to find and modify in code”). Paste that into Cursor and ask it to change the component, margin, padding, or gap; the text is written so Cursor can locate the right element and apply the change.
 
 ## 🚀 How to Use This Data for AI-Powered Frontend Optimization
 
@@ -208,12 +231,33 @@ function MyComponent({ variant, children }) {
 
 ## 🎮 Usage
 
-1. **Activate**: Hold the `CTRL` key (or `Cmd` on Mac)
-2. **Inspect**: Hover over any component with inspection metadata
-3. **View**: A tooltip appears showing component metadata
-4. **Lock**: Press `CTRL+H` to lock the tooltip position
-5. **Copy**: Click the copy icon to copy metadata to clipboard
-6. **Deactivate**: Release `CTRL` to exit inspection mode
+### Keyboard shortcuts (desktop)
+
+| Shortcut | Action |
+|----------|--------|
+| **Hold CTRL** | Enter inspection mode. Hover to inspect component (box/element). |
+| **Release CTRL** | Exit inspection mode and clear tooltip. |
+| **Hold CTRL+ALT** | Enter margin/padding mode. See orange (margin), green (padding), purple (gap). |
+| **CTRL+H** | Lock tooltip position so you can click copy buttons. |
+| **CTRL+Shift+R** | Hard refresh (browser default; not captured by the inspector). |
+
+### Basic flow
+
+1. **Activate**: Hold `CTRL` (or `Cmd` on Mac)
+2. **Inspect**: Hover over any element — tooltip shows component metadata and **How to find in code**
+3. **Copy**: Use the copy icon (component) or **Margin** / **Padding** / **Gap** buttons to copy metadata to clipboard
+4. **Lock** (optional): Press `CTRL+H` to lock the tooltip so it doesn’t follow the cursor
+5. **Deactivate**: Release `CTRL` to exit inspection mode
+
+### Margin, padding & gap inspection
+
+- **Hold CTRL+ALT** (while holding CTRL) to enter margin/padding mode. Overlays show:
+  - **Orange** = margin (outside the element)
+  - **Green** = padding (inside the element)
+  - **Purple dashed** = parent’s flex/grid gap (when the parent has `gap`)
+- If the current element has no margin, **dashed orange** outlines show ancestors that have margin; **click an outline** to inspect that ancestor.
+- Use the **Margin**, **Padding**, or **Gap** copy buttons in the tooltip to copy Cursor-ready text for that spacing.
+- The tooltip always shows **DOM Path**, **Parent**, **Role in tree**, **TARGET**, and **How to find** steps so you (and Cursor) know exactly which element to change.
 
 ## 🛡️ Safety Features
 
@@ -231,15 +275,18 @@ function MyComponent({ variant, children }) {
 
 ## 🎨 Features
 
-- ✅ Visual component highlighting
+- ✅ Visual component highlighting (box/element outline)
+- ✅ **Margin, padding & gap inspection** (hold CTRL+ALT) with orange/green/purple overlays
+- ✅ **Ancestor margin detection** – when the element has no margin, dashed outlines show ancestors with margin; click to inspect
+- ✅ **Copy Component / Margin / Padding / Gap** – Cursor-ready text with DOM path, TARGET, and how to find in code
+- ✅ **“How to find in code” in tooltip** – DOM path, parent, role in tree, TARGET, and numbered steps (desktop & mobile)
 - ✅ Rich metadata extraction
-- ✅ Copy-to-clipboard functionality
-- ✅ Automatic component detection
+- ✅ Automatic component detection (with or without `data-inspection-*`)
 - ✅ CSS selector generation
 - ✅ Usage path tracking
 - ✅ Instance indexing
 - ✅ Props signature extraction
-- ✅ Request blocking during inspection
+- ✅ Request blocking during inspection (when CTRL is held)
 - ✅ Production-safe (zero overhead)
 
 ## 🤖 Designed by Cursor AI
