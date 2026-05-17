@@ -239,27 +239,18 @@ export const InspectionTooltip: React.FC = () => {
     sourceFile: "DOM",
   } : null);
 
-  // Compute anchor position once per element change. The value is intentionally
-  // NOT recomputed when tooltipSize updates (ResizeObserver may fire several
-  // times as the tooltip's content renders) — recomputing on every size update
-  // makes the tooltip visibly slide and shrink as it settles. Pin location is
-  // chosen as: below the element if there's room, otherwise above, right, left,
-  // and finally a fixed corner for elements that fill the viewport.
-  const tooltipSizeRef = useRef(tooltipSize);
-  tooltipSizeRef.current = tooltipSize;
-
-  const [anchoredPosition, setAnchoredPosition] = useState<{ x: number; y: number } | null>(null);
-  useEffect(() => {
-    if (!hoveredElement || !document.body.contains(hoveredElement)) {
-      setAnchoredPosition(null);
-      return;
-    }
+  // Compute anchor based on the hovered element's rect. We re-run this when
+  // either the element or the measured tooltip size changes, but the state
+  // setter keeps the previous position whenever it still fits the tooltip in
+  // the viewport. That preserves a single stable position per element while
+  // self-correcting when the tooltip grows past the viewport bound (the case
+  // where content renders larger than the initial estimate).
+  const computeAnchor = (element: HTMLElement, w: number, h: number) => {
     const padding = 10;
     const gap = 8;
-    const { w, h } = tooltipSizeRef.current;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const rect = hoveredElement.getBoundingClientRect();
+    const rect = element.getBoundingClientRect();
     const spaceBelow = vh - rect.bottom;
     const spaceAbove = rect.top;
     const spaceRight = vw - rect.right;
@@ -284,8 +275,36 @@ export const InspectionTooltip: React.FC = () => {
       x = cx < vw / 2 ? vw - w - padding : padding;
       y = cy < vh / 2 ? vh - h - padding : padding;
     }
-    setAnchoredPosition(clampToViewport(x, y, w, h));
-  }, [hoveredElement]);
+    return clampToViewport(x, y, w, h);
+  };
+
+  const [anchoredPosition, setAnchoredPosition] = useState<{ x: number; y: number } | null>(null);
+  const anchoredForElementRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!hoveredElement || !document.body.contains(hoveredElement)) {
+      setAnchoredPosition(null);
+      anchoredForElementRef.current = null;
+      return;
+    }
+    const { w, h } = tooltipSize;
+    const padding = 10;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    setAnchoredPosition((prev) => {
+      const elementChanged = anchoredForElementRef.current !== hoveredElement;
+      const fitsNow =
+        !!prev &&
+        prev.x >= padding &&
+        prev.y >= padding &&
+        prev.x + w <= vw - padding &&
+        prev.y + h <= vh - padding;
+      // Keep the existing anchor whenever it still fits — this is what stops
+      // the tooltip from sliding as the ResizeObserver settles content size.
+      if (!elementChanged && fitsNow) return prev;
+      anchoredForElementRef.current = hoveredElement;
+      return computeAnchor(hoveredElement, w, h);
+    });
+  }, [hoveredElement, tooltipSize]);
 
   const positionFromElement = anchoredPosition;
 
