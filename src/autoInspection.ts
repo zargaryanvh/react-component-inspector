@@ -317,22 +317,60 @@ export const setupAutoInspection = (
   }
 
   // Detect if device supports touch
-  const isTouchDevice = 'ontouchstart' in window || 
-                        navigator.maxTouchPoints > 0 || 
+  const isTouchDevice = 'ontouchstart' in window ||
+                        navigator.maxTouchPoints > 0 ||
                         /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
+  // De-dupe: if mousemove resolves to the same DOM element as last time, skip
+  // the state update. Combined with the throttle below this is what prevents
+  // the tooltip from flickering when the cursor sits on a border between two
+  // wrapped components and rapid mouseenter/leave events would otherwise toggle
+  // the hovered element back and forth.
+  let lastInspectedElement: HTMLElement | null = null;
+  const dedupedSetHoveredComponent = (
+    metadata: ComponentMetadata | null,
+    element: HTMLElement | null,
+  ) => {
+    if (element === lastInspectedElement) return;
+    lastInspectedElement = element;
+    setHoveredComponent(metadata, element);
+  };
+
+  // Throttle mousemove processing to ~30 fps. DOM walking on every pixel of
+  // movement (the previous behavior) is wasted work and amplifies any border
+  // jitter into visible flicker.
+  let pendingTarget: HTMLElement | null = null;
+  let throttleHandle: number | null = null;
+  const flushPendingTarget = () => {
+    throttleHandle = null;
+    const t = pendingTarget;
+    pendingTarget = null;
+    if (t) inspectElement(t, isInspectionActive, isLocked, dedupedSetHoveredComponent);
+  };
+
   const handleMouseMove = (e: MouseEvent) => {
-    if (!isInspectionActive) {
-      return;
+    if (!isInspectionActive) return;
+    if (isLocked) return;
+
+    // Sticky: while the cursor is still within the bounds of the element we
+    // last anchored the tooltip to, do nothing. This stops the tooltip from
+    // sliding around as the deepest DOM element under the cursor changes
+    // pixel-by-pixel inside a large container.
+    if (lastInspectedElement && document.body.contains(lastInspectedElement)) {
+      const rect = lastInspectedElement.getBoundingClientRect();
+      if (
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom
+      ) {
+        return;
+      }
     }
 
-    // If locked, don't update on mouse move - keep current tooltip fixed
-    if (isLocked) {
-      return;
-    }
-
-    const target = e.target as HTMLElement;
-    inspectElement(target, isInspectionActive, isLocked, setHoveredComponent);
+    pendingTarget = e.target as HTMLElement;
+    if (throttleHandle !== null) return;
+    throttleHandle = window.setTimeout(flushPendingTarget, 32);
   };
 
   // Touch move handler for mobile devices
@@ -347,7 +385,7 @@ export const setupAutoInspection = (
     const target = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement;
     
     if (target) {
-      inspectElement(target, isInspectionActive, isLocked, setHoveredComponent);
+      inspectElement(target, isInspectionActive, isLocked, dedupedSetHoveredComponent);
     }
   };
 
@@ -362,14 +400,15 @@ export const setupAutoInspection = (
     // Get the element under the first touch point
     const touch = e.touches[0];
     const target = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement;
-    
+
     if (target) {
-      inspectElement(target, isInspectionActive, isLocked, setHoveredComponent);
+      inspectElement(target, isInspectionActive, isLocked, dedupedSetHoveredComponent);
     }
   };
 
   const handleMouseLeave = () => {
     if (isInspectionActive && !isLocked) {
+      lastInspectedElement = null;
       setHoveredComponent(null, null);
     }
   };
@@ -377,6 +416,7 @@ export const setupAutoInspection = (
   const handleTouchEnd = () => {
     // Clear inspection on touch end (unless locked)
     if (isInspectionActive && !isLocked) {
+      lastInspectedElement = null;
       setHoveredComponent(null, null);
     }
   };
@@ -395,7 +435,11 @@ export const setupAutoInspection = (
   return () => {
     window.removeEventListener("mousemove", handleMouseMove);
     document.removeEventListener("mouseleave", handleMouseLeave);
-    
+    if (throttleHandle !== null) {
+      clearTimeout(throttleHandle);
+      throttleHandle = null;
+    }
+
     if (isTouchDevice) {
       window.removeEventListener("touchmove", handleTouchMove);
       window.removeEventListener("touchstart", handleTouchStart);
