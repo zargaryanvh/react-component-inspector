@@ -1,6 +1,6 @@
 {
   "name": "@zargaryanvh/react-component-inspector",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "A development tool for inspecting React components with AI-friendly metadata extraction",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
