@@ -1,5 +1,6 @@
 // Main exports
-export { InspectionProvider, useInspection, ComponentMetadata } from './InspectionContext';
+export { InspectionProvider, useInspection } from './InspectionContext';
+export type { ComponentMetadata } from './InspectionContext';
 export { InspectionTooltip } from './InspectionTooltip';
 export { InspectionHighlight } from './InspectionHighlight';
 export { InspectionOverlays } from './InspectionOverlays';

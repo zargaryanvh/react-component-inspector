@@ -12,7 +12,12 @@ export default function App() {
       </Typography>
 
       <Stack spacing={3}>
-        <InspectionWrapper componentName="LoginCard" filePath="example/src/App.tsx">
+        <InspectionWrapper
+          componentName="LoginCard"
+          usagePath="App > LoginCard"
+          props={{}}
+          sourceFile="example/src/App.tsx"
+        >
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>Sign in</Typography>
@@ -25,7 +30,12 @@ export default function App() {
           </Card>
         </InspectionWrapper>
 
-        <InspectionWrapper componentName="ActionBar" filePath="example/src/App.tsx">
+        <InspectionWrapper
+          componentName="ActionBar"
+          usagePath="App > ActionBar"
+          props={{}}
+          sourceFile="example/src/App.tsx"
+        >
           <Stack direction="row" spacing={2}>
             <Button variant="outlined">Cancel</Button>
             <Button variant="contained" color="primary">Save</Button>
@@ -33,7 +43,12 @@ export default function App() {
           </Stack>
         </InspectionWrapper>
 
-        <InspectionWrapper componentName="InfoBox" filePath="example/src/App.tsx">
+        <InspectionWrapper
+          componentName="InfoBox"
+          usagePath="App > InfoBox"
+          props={{ variant: 'info' }}
+          sourceFile="example/src/App.tsx"
+        >
           <Box sx={{ p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
             <Typography variant="body2">
               This is a sample InfoBox component to test margin/padding inspection.
