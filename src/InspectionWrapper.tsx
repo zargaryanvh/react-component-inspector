@@ -1,5 +1,4 @@
-import React, { useRef, ReactElement, ComponentType } from "react";
-import { useInspection, ComponentMetadata } from "./InspectionContext";
+import React, { ReactElement, ComponentType } from "react";
 import {
   generateComponentId,
   formatPropsSignature,
@@ -32,98 +31,31 @@ export const InspectionWrapper: React.FC<InspectionWrapperProps> = ({
   sourceFile,
   children,
 }) => {
-  const { isInspectionActive, setHoveredComponent } = useInspection();
   const instanceIndex = React.useMemo(() => getNextInstanceIndex(componentName), [componentName]);
 
-  const handleMouseEnter = (e: React.MouseEvent) => {
-    if (!isInspectionActive) return;
-
-    const target = e.currentTarget as HTMLElement;
-
-    const metadata: ComponentMetadata = {
-      componentName,
-      componentId: generateComponentId(componentName, instanceIndex),
-      variant,
-      role,
-      usagePath,
-      instanceIndex,
-      propsSignature: formatPropsSignature(props),
-      sourceFile,
-    };
-
-    setHoveredComponent(metadata, target);
-  };
-
-  const handleMouseLeave = () => {
-    if (!isInspectionActive) return;
-    setHoveredComponent(null, null);
-  };
-
-  // Touch handlers for mobile
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (!isInspectionActive) return;
-
-    const target = e.currentTarget as HTMLElement;
-
-    const metadata: ComponentMetadata = {
-      componentName,
-      componentId: generateComponentId(componentName, instanceIndex),
-      variant,
-      role,
-      usagePath,
-      instanceIndex,
-      propsSignature: formatPropsSignature(props),
-      sourceFile,
-    };
-
-    setHoveredComponent(metadata, target);
-  };
-
-  const handleTouchEnd = () => {
-    // Don't clear on touch end - let autoInspection handle it
-  };
-
-  // Clone the child element and add inspection handlers
+  // Attach data-inspection-* attributes only; the global autoInspection mousemove
+  // handler is the single source of truth for hover tracking. This avoids the
+  // border flicker caused by competing mouseEnter/mouseLeave handlers firing
+  // back and forth when the cursor sits on the edge between two components.
   if (!React.isValidElement(children)) {
     return <>{children}</>;
   }
 
-  const existingProps = (children.props || {}) as any;
-  const existingOnMouseEnter = existingProps.onMouseEnter;
-  const existingOnMouseLeave = existingProps.onMouseLeave;
-  const existingOnTouchStart = existingProps.onTouchStart;
-  const existingOnTouchEnd = existingProps.onTouchEnd;
+  const componentId = generateComponentId(componentName, instanceIndex);
+  const propsSignature = formatPropsSignature(props);
 
-  const childWithProps = React.cloneElement(children, {
-    onMouseEnter: (e: React.MouseEvent) => {
-      handleMouseEnter(e);
-      if (existingOnMouseEnter) {
-        existingOnMouseEnter(e);
-      }
-    },
-    onMouseLeave: (e: React.MouseEvent) => {
-      handleMouseLeave();
-      if (existingOnMouseLeave) {
-        existingOnMouseLeave(e);
-      }
-    },
-    onTouchStart: (e: React.TouchEvent) => {
-      handleTouchStart(e);
-      if (existingOnTouchStart) {
-        existingOnTouchStart(e);
-      }
-    },
-    onTouchEnd: (e: React.TouchEvent) => {
-      handleTouchEnd();
-      if (existingOnTouchEnd) {
-        existingOnTouchEnd(e);
-      }
-    },
-    "data-inspection-id": generateComponentId(componentName, instanceIndex),
+  const dataAttrs: Record<string, string> = {
+    "data-inspection-id": componentId,
     "data-inspection-name": componentName,
-  } as any);
+    "data-inspection-usage-path": usagePath,
+    "data-inspection-instance": String(instanceIndex),
+    "data-inspection-props": propsSignature,
+    "data-inspection-file": sourceFile,
+  };
+  if (variant) dataAttrs["data-inspection-variant"] = variant;
+  if (role) dataAttrs["data-inspection-role"] = role;
 
-  return <>{childWithProps}</>;
+  return <>{React.cloneElement(children, dataAttrs as any)}</>;
 };
 
 /**

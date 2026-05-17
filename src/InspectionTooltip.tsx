@@ -200,7 +200,6 @@ const ComponentMetadataSection: React.FC<{ metadata: ComponentMetadata }> = ({ m
  */
 export const InspectionTooltip: React.FC = () => {
   const { isInspectionActive, isLocked, isMobile, isMarginPaddingMode, hoveredComponent, hoveredElement } = useInspection();
-  const [position, setPosition] = useState({ x: 0, y: 0 });
   const [stablePosition, setStablePosition] = useState<{ x: number; y: number } | null>(null);
   const [copied, setCopied] = useState<CopyType | null>(null);
   const [tooltipSize, setTooltipSize] = useState<{ w: number; h: number }>({ w: 400, h: 300 });
@@ -222,53 +221,13 @@ export const InspectionTooltip: React.FC = () => {
     return () => observer.disconnect();
   }, [isInspectionActive, hoveredComponent]);
 
-  // Update position based on cursor, but keep it stable when locked or mouse is near tooltip
+  // Reset stored cursor position when inspection turns off so we don't reuse
+  // a stale value on the next activation.
   useEffect(() => {
     if (!isInspectionActive || !hoveredElement) {
       setStablePosition(null);
-      return;
     }
-
-    // If locked, don't update position at all - keep it completely fixed
-    if (isLocked) {
-      return;
-    }
-
-    const updatePosition = (e: MouseEvent) => {
-      // If we have a stable position, check if mouse is near tooltip
-      if (stablePosition && tooltipRef.current) {
-        const tooltipRect = tooltipRef.current.getBoundingClientRect();
-        const mouseX = e.clientX;
-        const mouseY = e.clientY;
-        
-        // Create a "dead zone" around tooltip (80px padding for easier clicking)
-        const deadZone = {
-          left: tooltipRect.left - 80,
-          right: tooltipRect.right + 80,
-          top: tooltipRect.top - 80,
-          bottom: tooltipRect.bottom + 80,
-        };
-        
-        // If mouse is in dead zone, keep position stable (don't update)
-        if (
-          mouseX >= deadZone.left &&
-          mouseX <= deadZone.right &&
-          mouseY >= deadZone.top &&
-          mouseY <= deadZone.bottom
-        ) {
-          return; // Don't update position - keep it stable
-        }
-      }
-      
-      // Mouse moved far from tooltip - update position
-      setPosition({ x: e.clientX, y: e.clientY });
-      // Clear stable position so it recalculates
-      setStablePosition(null);
-    };
-
-    window.addEventListener("mousemove", updatePosition);
-    return () => window.removeEventListener("mousemove", updatePosition);
-  }, [isInspectionActive, isLocked, hoveredElement, stablePosition]);
+  }, [isInspectionActive, hoveredElement]);
 
   // If no component metadata but we have an element, create basic metadata
   const displayComponent = hoveredComponent || (hoveredElement ? {
@@ -280,22 +239,31 @@ export const InspectionTooltip: React.FC = () => {
     sourceFile: "DOM",
   } : null);
 
-  // Place tooltip outside the hovered element's rect, preferring below-right, then above, left, right
-  const positionFromElement = useMemo(() => {
-    if (!hoveredElement || !document.body.contains(hoveredElement)) return null;
+  // Compute anchor position once per element change. The value is intentionally
+  // NOT recomputed when tooltipSize updates (ResizeObserver may fire several
+  // times as the tooltip's content renders) — recomputing on every size update
+  // makes the tooltip visibly slide and shrink as it settles. Pin location is
+  // chosen as: below the element if there's room, otherwise above, right, left,
+  // and finally a fixed corner for elements that fill the viewport.
+  const tooltipSizeRef = useRef(tooltipSize);
+  tooltipSizeRef.current = tooltipSize;
+
+  const [anchoredPosition, setAnchoredPosition] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!hoveredElement || !document.body.contains(hoveredElement)) {
+      setAnchoredPosition(null);
+      return;
+    }
     const padding = 10;
     const gap = 8;
-    const w = tooltipSize.w;
-    const h = tooltipSize.h;
+    const { w, h } = tooltipSizeRef.current;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const rect = hoveredElement.getBoundingClientRect();
-
     const spaceBelow = vh - rect.bottom;
     const spaceAbove = rect.top;
     const spaceRight = vw - rect.right;
     const spaceLeft = rect.left;
-
     let x: number;
     let y: number;
     if (spaceBelow >= h + gap + padding) {
@@ -311,75 +279,37 @@ export const InspectionTooltip: React.FC = () => {
       x = rect.left - w - gap;
       y = Math.min(Math.max(rect.top, padding), vh - h - padding);
     } else {
-      // Element fills viewport — pin to the corner farthest from the element's center
       const cx = (rect.left + rect.right) / 2;
       const cy = (rect.top + rect.bottom) / 2;
       x = cx < vw / 2 ? vw - w - padding : padding;
       y = cy < vh / 2 ? vh - h - padding : padding;
     }
-    return clampToViewport(x, y, w, h);
-  }, [hoveredElement, tooltipSize]);
+    setAnchoredPosition(clampToViewport(x, y, w, h));
+  }, [hoveredElement]);
 
-  // Calculate adjusted position to avoid going off-screen and avoid covering the hovered element
+  const positionFromElement = anchoredPosition;
+
+  // Position is anchored to the hovered element's rect, not the cursor. This
+  // keeps the tooltip static while the cursor moves around inside one element
+  // (e.g. when inspecting a large container) and only repositions when the
+  // hovered element changes.
   const adjustedPosition = useMemo(() => {
     const w = tooltipSize.w;
     const h = tooltipSize.h;
-
-    if (!displayComponent) {
-      return clampToViewport(position.x + 15, position.y + 15, w, h);
-    }
-
-    if (stablePosition) {
-      return clampToViewport(stablePosition.x, stablePosition.y, w, h);
-    }
-
-    // Mobile or locked: position relative to the element so it never covers the inspected area
-    if ((isMobile || isLocked) && positionFromElement) {
-      return positionFromElement;
-    }
-
-    // Desktop cursor mode: place near cursor, clamp to viewport
-    let x = position.x + 15;
-    let y = position.y + 15;
-    const padding = 10;
-    if (x + w > window.innerWidth - padding) x = position.x - w - 15;
-    if (y + h > window.innerHeight - padding) y = position.y - h - 15;
-    const clamped = clampToViewport(x, y, w, h);
-
-    // If clamped tooltip overlaps the inspected element, fall back to element-based positioning
-    if (hoveredElement && positionFromElement) {
-      const rect = hoveredElement.getBoundingClientRect();
-      const overlaps =
-        clamped.x < rect.right &&
-        clamped.x + w > rect.left &&
-        clamped.y < rect.bottom &&
-        clamped.y + h > rect.top;
-      if (overlaps) return positionFromElement;
-    }
-    return clamped;
-  }, [position, displayComponent, stablePosition, isMobile, isLocked, positionFromElement, tooltipSize, hoveredElement]);
+    if (positionFromElement) return positionFromElement;
+    return clampToViewport(15, 15, w, h);
+  }, [positionFromElement, tooltipSize]);
   
-  // Set stable position once when tooltip first appears for a new element, or when locked
-  const lastComponentIdRef = useRef<string | null>(null);
+  // When the lock is engaged we freeze whatever position was being shown at
+  // that moment so it doesn't follow subsequent element changes.
   useEffect(() => {
-    const currentComponentId = displayComponent?.componentId || null;
-    
-    // When locked, ensure we have a stable position
-    if (isLocked && !stablePosition && displayComponent && adjustedPosition.x > 0 && adjustedPosition.y > 0) {
+    if (isLocked && !stablePosition && adjustedPosition.x > 0 && adjustedPosition.y > 0) {
       setStablePosition(adjustedPosition);
-      return;
     }
-    
-    // Only set stable position when component changes or when we don't have one yet
-    if (currentComponentId !== lastComponentIdRef.current && !stablePosition && displayComponent && adjustedPosition.x > 0 && adjustedPosition.y > 0) {
-      lastComponentIdRef.current = currentComponentId;
-      // Set stable position after a small delay to ensure tooltip is rendered
-      const timer = setTimeout(() => {
-        setStablePosition(adjustedPosition);
-      }, 50);
-      return () => clearTimeout(timer);
+    if (!isLocked && stablePosition) {
+      setStablePosition(null);
     }
-  }, [displayComponent?.componentId, adjustedPosition, stablePosition, displayComponent, isLocked]);
+  }, [isLocked, adjustedPosition, stablePosition]);
 
   const fallbackCopy = (text: string): boolean => {
     const textarea = document.createElement("textarea");
@@ -496,7 +426,7 @@ export const InspectionTooltip: React.FC = () => {
         backgroundColor: "rgba(18, 18, 18, 0.95)",
         backdropFilter: "blur(8px)",
         border: "1px solid rgba(255, 255, 255, 0.1)",
-        transition: stablePosition ? "none" : "left 0.1s ease-out, top 0.1s ease-out",
+        transition: "none",
       }}
     >
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}>
