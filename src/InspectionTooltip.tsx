@@ -7,6 +7,21 @@ import { parseInspectionMetadata } from "./autoInspection";
 import type { CopyType } from "./inspection";
 
 /**
+ * Helper: Clamp a tooltip rect to the viewport so it's always fully visible
+ */
+const clampToViewport = (x: number, y: number, w: number, h: number, padding = 10) => {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  let cx = x;
+  let cy = y;
+  if (cx + w > vw - padding) cx = vw - w - padding;
+  if (cy + h > vh - padding) cy = vh - h - padding;
+  if (cx < padding) cx = padding;
+  if (cy < padding) cy = padding;
+  return { x: cx, y: cy };
+};
+
+/**
  * Helper: Get element text content (first 100 chars)
  */
 const getElementText = (element: HTMLElement | null): string | null => {
@@ -188,7 +203,24 @@ export const InspectionTooltip: React.FC = () => {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [stablePosition, setStablePosition] = useState<{ x: number; y: number } | null>(null);
   const [copied, setCopied] = useState<CopyType | null>(null);
+  const [tooltipSize, setTooltipSize] = useState<{ w: number; h: number }>({ w: 400, h: 300 });
   const tooltipRef = useRef<HTMLDivElement>(null);
+
+  // Measure tooltip size so we can clamp it to the viewport precisely
+  useEffect(() => {
+    if (!tooltipRef.current || typeof ResizeObserver === "undefined") return;
+    const el = tooltipRef.current;
+    const observer = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        setTooltipSize((prev) =>
+          prev.w === r.width && prev.h === r.height ? prev : { w: r.width, h: r.height }
+        );
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isInspectionActive, hoveredComponent]);
 
   // Update position based on cursor, but keep it stable when locked or mouse is near tooltip
   useEffect(() => {
@@ -248,69 +280,84 @@ export const InspectionTooltip: React.FC = () => {
     sourceFile: "DOM",
   } : null);
 
-  // On mobile (or when locking) there is no cursor; position tooltip over/near the inspected element
+  // Place tooltip outside the hovered element's rect, preferring below-right, then above, left, right
   const positionFromElement = useMemo(() => {
     if (!hoveredElement || !document.body.contains(hoveredElement)) return null;
     const padding = 10;
-    const estimatedWidth = 400;
-    const estimatedHeight = 200;
+    const gap = 8;
+    const w = tooltipSize.w;
+    const h = tooltipSize.h;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
     const rect = hoveredElement.getBoundingClientRect();
-    // Prefer below and to the right of the element, clamped to viewport
-    let x = rect.left + 15;
-    let y = rect.bottom + 10;
-    if (x + estimatedWidth > window.innerWidth - padding) x = window.innerWidth - estimatedWidth - padding;
-    if (x < padding) x = padding;
-    if (y + estimatedHeight > window.innerHeight - padding) y = rect.top - estimatedHeight - 10;
-    if (y < padding) y = padding;
-    return { x, y };
-  }, [hoveredElement]);
 
-  // Calculate adjusted position to avoid going off-screen
-  // Use stable position if available; on mobile or when locked use element-based position so tooltip appears over inspected area
+    const spaceBelow = vh - rect.bottom;
+    const spaceAbove = rect.top;
+    const spaceRight = vw - rect.right;
+    const spaceLeft = rect.left;
+
+    let x: number;
+    let y: number;
+    if (spaceBelow >= h + gap + padding) {
+      y = rect.bottom + gap;
+      x = Math.min(Math.max(rect.left, padding), vw - w - padding);
+    } else if (spaceAbove >= h + gap + padding) {
+      y = rect.top - h - gap;
+      x = Math.min(Math.max(rect.left, padding), vw - w - padding);
+    } else if (spaceRight >= w + gap + padding) {
+      x = rect.right + gap;
+      y = Math.min(Math.max(rect.top, padding), vh - h - padding);
+    } else if (spaceLeft >= w + gap + padding) {
+      x = rect.left - w - gap;
+      y = Math.min(Math.max(rect.top, padding), vh - h - padding);
+    } else {
+      // Element fills viewport — pin to the corner farthest from the element's center
+      const cx = (rect.left + rect.right) / 2;
+      const cy = (rect.top + rect.bottom) / 2;
+      x = cx < vw / 2 ? vw - w - padding : padding;
+      y = cy < vh / 2 ? vh - h - padding : padding;
+    }
+    return clampToViewport(x, y, w, h);
+  }, [hoveredElement, tooltipSize]);
+
+  // Calculate adjusted position to avoid going off-screen and avoid covering the hovered element
   const adjustedPosition = useMemo(() => {
+    const w = tooltipSize.w;
+    const h = tooltipSize.h;
+
     if (!displayComponent) {
-      return { x: position.x + 15, y: position.y + 15 };
+      return clampToViewport(position.x + 15, position.y + 15, w, h);
     }
 
-    // If we have a stable position, use it (don't recalculate)
     if (stablePosition) {
-      return stablePosition;
+      return clampToViewport(stablePosition.x, stablePosition.y, w, h);
     }
 
-    // Mobile or just locked: place tooltip near the inspected element (not cursor)
+    // Mobile or locked: position relative to the element so it never covers the inspected area
     if ((isMobile || isLocked) && positionFromElement) {
       return positionFromElement;
     }
 
-    // Desktop: calculate from cursor position
-    const padding = 10;
+    // Desktop cursor mode: place near cursor, clamp to viewport
     let x = position.x + 15;
     let y = position.y + 15;
+    const padding = 10;
+    if (x + w > window.innerWidth - padding) x = position.x - w - 15;
+    if (y + h > window.innerHeight - padding) y = position.y - h - 15;
+    const clamped = clampToViewport(x, y, w, h);
 
-    // Adjust if tooltip would go off right edge (estimate width)
-    const estimatedWidth = 400; // Approximate tooltip width
-    if (x + estimatedWidth > window.innerWidth - padding) {
-      x = position.x - estimatedWidth - 15;
+    // If clamped tooltip overlaps the inspected element, fall back to element-based positioning
+    if (hoveredElement && positionFromElement) {
+      const rect = hoveredElement.getBoundingClientRect();
+      const overlaps =
+        clamped.x < rect.right &&
+        clamped.x + w > rect.left &&
+        clamped.y < rect.bottom &&
+        clamped.y + h > rect.top;
+      if (overlaps) return positionFromElement;
     }
-
-    // Adjust if tooltip would go off bottom edge (estimate height)
-    const estimatedHeight = 200; // Approximate tooltip height
-    if (y + estimatedHeight > window.innerHeight - padding) {
-      y = position.y - estimatedHeight - 15;
-    }
-
-    // Adjust if tooltip would go off left edge
-    if (x < padding) {
-      x = padding;
-    }
-
-    // Adjust if tooltip would go off top edge
-    if (y < padding) {
-      y = padding;
-    }
-
-    return { x, y };
-  }, [position, displayComponent, stablePosition, isMobile, isLocked, positionFromElement]);
+    return clamped;
+  }, [position, displayComponent, stablePosition, isMobile, isLocked, positionFromElement, tooltipSize, hoveredElement]);
   
   // Set stable position once when tooltip first appears for a new element, or when locked
   const lastComponentIdRef = useRef<string | null>(null);
